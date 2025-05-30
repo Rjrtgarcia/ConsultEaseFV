@@ -107,32 +107,36 @@ class FacultyController:
                         return
 
                     # Update faculty status in database
-                    faculty = self.update_faculty_status(faculty_id, status)
+                    faculty_dict = self.update_faculty_status(faculty_id, status)
 
-                    if faculty:
+                    if faculty_dict:
                         # Store the detected MAC address if present
                         if detected_mac and status:
-                            # Normalize the MAC address
                             normalized_mac = Faculty.normalize_mac_address(detected_mac)
-                            if normalized_mac != faculty.ble_id:
-                                logger.info(f"Updating faculty {faculty_id} BLE ID from {faculty.ble_id} to {normalized_mac}")
-                                # Update the BLE ID with the detected MAC address
-                                db = get_db()
-                                faculty.ble_id = normalized_mac
-                                db.commit()
+                            if normalized_mac != faculty_dict.get('ble_id'): 
+                                logger.info(f"Updating faculty {faculty_id} BLE ID from {faculty_dict.get('ble_id')} to {normalized_mac}")
+                                self.update_faculty_ble_id(faculty_id, normalized_mac) # Use existing method
 
-                        # Notify callbacks
-                        self._notify_callbacks(faculty)
+                        # For callbacks that expect a Faculty object, re-fetch it.
+                        # This ensures they get an attached object if they need to lazy-load.
+                        # Callbacks should ideally be refactored to accept dicts if possible.
+                        db_callback_session = get_db()
+                        try:
+                            faculty_obj_for_callback = db_callback_session.query(Faculty).filter(Faculty.id == faculty_id).first()
+                            if faculty_obj_for_callback:
+                                self._notify_callbacks(faculty_obj_for_callback)
+                        finally:
+                            db_callback_session.close()
 
                         # Publish notification
                         try:
                             notification = {
                                 'type': 'faculty_mac_status',
-                                'faculty_id': faculty.id,
-                                'faculty_name': faculty.name,
+                                'faculty_id': faculty_dict['id'],
+                                'faculty_name': faculty_dict['name'],
                                 'status': status,
                                 'detected_mac': detected_mac,
-                                'timestamp': faculty.last_seen.isoformat() if faculty.last_seen else None
+                                'timestamp': faculty_dict['last_seen']
                             }
                             publish_mqtt_message(MQTTTopics.SYSTEM_NOTIFICATIONS, notification)
                         except Exception as e:
@@ -366,7 +370,7 @@ class FacultyController:
             status (bool): New status (True = Available, False = Unavailable)
 
         Returns:
-            Faculty: Updated faculty object or None if not found
+            dict: Dictionary containing updated faculty data, or None if not found or error.
         """
         import threading
 
@@ -418,6 +422,7 @@ class FacultyController:
                         'name': faculty.name,
                         'department': faculty.department,
                         'status': faculty.status,
+                        'ble_id': faculty.ble_id,
                         'last_seen': faculty.last_seen.isoformat() if faculty.last_seen else None,
                         'version': getattr(faculty, 'version', 1)
                     }
@@ -429,7 +434,7 @@ class FacultyController:
                 # Publish MQTT notification with sequence number to ensure ordering
                 self._publish_status_update_with_sequence_safe(faculty_data, status, previous_status)
 
-                return faculty
+                return faculty_data
 
             except Exception as e:
                 logger.error(f"Error updating faculty status atomically: {str(e)}")
