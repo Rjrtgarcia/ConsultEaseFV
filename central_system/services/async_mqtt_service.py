@@ -74,6 +74,8 @@ class AsyncMQTTService:
         self.last_batch_time = 0
         self.batched_messages = 0
 
+        self.pending_subscriptions: Dict[int, str] = {} # Added to track pending subscriptions
+
         # Initialize client
         self._initialize_client()
 
@@ -93,6 +95,7 @@ class AsyncMQTTService:
             self.client.on_disconnect = self._on_disconnect
             self.client.on_message = self._on_message
             self.client.on_publish = self._on_publish
+            self.client.on_subscribe = self._on_subscribe # Added on_subscribe callback
 
             # Configure client options for reliability
             self.client.reconnect_delay_set(min_delay=1, max_delay=120)
@@ -115,8 +118,12 @@ class AsyncMQTTService:
             # Resubscribe to all topics
             for topic in self.message_handlers.keys():
                 try:
-                    client.subscribe(topic)
-                    logger.debug(f"Resubscribed to topic: {topic}")
+                    result, mid = client.subscribe(topic)
+                    if result == mqtt.MQTT_ERR_SUCCESS:
+                        self.pending_subscriptions[mid] = topic
+                        logger.debug(f"Subscription request sent for topic: {topic}, mid: {mid}")
+                    else:
+                        logger.error(f"Failed to send subscription request for topic {topic}. Paho error code: {result}")
                 except Exception as e:
                     logger.error(f"Error resubscribing to topic {topic}: {e}")
         else:
@@ -136,6 +143,21 @@ class AsyncMQTTService:
             logger.warning(f"Unexpected MQTT disconnection. Return code: {rc}")
         else:
             logger.info("MQTT client disconnected")
+
+    def _on_subscribe(self, client, userdata, mid, granted_qos): # Added _on_subscribe callback
+        """Handle subscription acknowledgments."""
+        topic = self.pending_subscriptions.pop(mid, "unknown_topic")
+        if granted_qos: # If broker grants QoS level(s), subscription is successful for those.
+            # Paho's granted_qos is a list of QoS levels for each topic in the SUBSCRIBE packet.
+            # For single topic subscriptions, it's a list with one element.
+            # If any granted_qos value is 0, 1, or 2, it's a success. 0x80 (128) means failure.
+            successful_subscription = any(qos_level <= 2 for qos_level in granted_qos)
+            if successful_subscription:
+                logger.info(f"Successfully subscribed to topic: {topic}, granted QoS: {granted_qos}")
+            else:
+                logger.error(f"Subscription FAILED for topic: {topic}. Broker rejected subscription. Granted QoS: {granted_qos}")
+        else: # This case might not happen if granted_qos is always a list, but good to have a fallback.
+            logger.error(f"Subscription FAILED for topic: {topic}. Broker did not grant QoS.")
 
     def _on_message(self, client, userdata, msg):
         """Handle incoming MQTT messages."""
@@ -512,8 +534,12 @@ class AsyncMQTTService:
         # Subscribe to topic if connected
         if self.is_connected and self.client:
             try:
-                self.client.subscribe(topic)
-                logger.info(f"Subscribed to topic: {topic}")
+                result, mid = self.client.subscribe(topic)
+                if result == mqtt.MQTT_ERR_SUCCESS:
+                    self.pending_subscriptions[mid] = topic
+                    logger.info(f"Subscription request sent for topic: {topic}, mid: {mid}")
+                else:
+                    logger.error(f"Failed to send subscription request for topic {topic} during registration. Paho error code: {result}")
             except Exception as e:
                 logger.error(f"Error subscribing to topic {topic}: {e}")
 
