@@ -6,6 +6,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QPixmap
 
 import os
+import logging
 import time
 from .base_window import BaseWindow
 from .consultation_panel import ConsultationPanel
