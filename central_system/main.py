@@ -124,9 +124,6 @@ class ConsultEaseApp:
         logger.info("Initializing database and ensuring admin account integrity...")
         init_db()
 
-        # Perform additional admin account verification after database initialization
-        self._verify_admin_account_startup()
-
         # Start system monitoring
         logger.info("Starting system monitoring...")
         from .utils.system_monitor import start_system_monitoring
@@ -154,6 +151,9 @@ class ConsultEaseApp:
 
         # Ensure default admin exists
         self.admin_controller.ensure_default_admin()
+        
+        # Perform admin account verification after admin controller is initialized
+        self._verify_admin_account_startup()
 
         # Initialize windows
         self.login_window = None
