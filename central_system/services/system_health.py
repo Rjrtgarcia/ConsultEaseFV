@@ -25,7 +25,6 @@ class HealthStatus(Enum):
 
 class ComponentType(Enum):
     """System component types."""
-    DATABASE = "database"
     MQTT = "mqtt"
     ESP32 = "esp32"
     UI = "ui"
@@ -325,15 +324,6 @@ class SystemHealthMonitor:
     
     def _setup_default_health_checks(self):
         """Setup default health checks."""
-        # Database health check
-        self.register_health_check(HealthCheck(
-            name="database_connection",
-            component_type=ComponentType.DATABASE,
-            check_function=self._check_database_health,
-            interval=30.0,
-            critical=True
-        ))
-        
         # MQTT health check
         self.register_health_check(HealthCheck(
             name="mqtt_connection",
@@ -405,17 +395,6 @@ class SystemHealthMonitor:
                     logger.error(f"Error running health check {name}: {e}")
                     check.last_status = HealthStatus.CRITICAL
                     check.error_count += 1
-    
-    def _check_database_health(self) -> bool:
-        """Check database health."""
-        try:
-            from ..services.database_manager import get_database_manager
-            db_manager = get_database_manager()
-            health_status = db_manager.get_health_status()
-            return health_status['is_healthy']
-        except Exception as e:
-            logger.debug(f"Database health check failed: {e}")
-            return False
     
     def _check_mqtt_health(self) -> bool:
         """Check MQTT health."""

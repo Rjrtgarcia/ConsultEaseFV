@@ -226,6 +226,9 @@ class DashboardWindow(BaseWindow):
         self.refresh_timer.timeout.connect(self.refresh_faculty_status)
         self.refresh_timer.start(180000)  # Start with 3 minutes
 
+        # Set up real-time MQTT subscription for faculty status updates
+        self.setup_realtime_updates()
+
         # UI performance utilities
         self.ui_batcher = get_ui_batcher()
         self.widget_state_manager = get_widget_state_manager()
@@ -1528,5 +1531,148 @@ class DashboardWindow(BaseWindow):
         # Save splitter state before closing
         self.save_splitter_state()
 
+        # Unsubscribe from MQTT topics
+        self.cleanup_realtime_updates()
+
         # Call parent close event
         super().closeEvent(event)
+
+    def setup_realtime_updates(self):
+        """Set up real-time MQTT subscriptions for faculty status updates."""
+        try:
+            from ..utils.mqtt_utils import subscribe_to_topic
+            from ..utils.mqtt_topics import MQTTTopics
+            
+            # Subscribe to faculty status updates
+            subscribe_to_topic("consultease/faculty/+/status_update", self.handle_realtime_status_update)
+            subscribe_to_topic(MQTTTopics.SYSTEM_NOTIFICATIONS, self.handle_system_notification)
+            
+            logger.info("Real-time faculty status updates enabled")
+        except Exception as e:
+            logger.error(f"Failed to set up real-time updates: {e}")
+
+    def cleanup_realtime_updates(self):
+        """Clean up MQTT subscriptions on window close."""
+        try:
+            # Nothing to do here as MQTT subscriptions are handled at the service level
+            # and will be automatically removed when the application exits
+            pass
+        except Exception as e:
+            logger.error(f"Error cleaning up MQTT subscriptions: {e}")
+
+    def handle_realtime_status_update(self, topic, data):
+        """
+        Handle real-time faculty status updates from MQTT.
+        
+        Args:
+            topic (str): MQTT topic
+            data (dict): Status update data
+        """
+        try:
+            logger.debug(f"Received real-time faculty status update: {data}")
+            
+            # Extract faculty ID and status
+            faculty_id = data.get('faculty_id')
+            new_status = data.get('status')
+            
+            if faculty_id is None or new_status is None:
+                logger.warning(f"Invalid faculty status update: {data}")
+                return
+                
+            # Find and update the corresponding faculty card
+            self.update_faculty_card_status(faculty_id, new_status)
+            
+        except Exception as e:
+            logger.error(f"Error handling real-time status update: {e}")
+
+    def handle_system_notification(self, topic, data):
+        """
+        Handle system notifications from MQTT.
+        
+        Args:
+            topic (str): MQTT topic
+            data (dict): Notification data
+        """
+        try:
+            # Check if this is a faculty status notification
+            if data.get('type') == 'faculty_status':
+                faculty_id = data.get('faculty_id')
+                new_status = data.get('status')
+                
+                if faculty_id is not None and new_status is not None:
+                    # Update the faculty card
+                    self.update_faculty_card_status(faculty_id, new_status)
+        except Exception as e:
+            logger.error(f"Error handling system notification: {e}")
+
+    def update_faculty_card_status(self, faculty_id, new_status):
+        """
+        Update the status of a faculty card in real-time.
+        
+        Args:
+            faculty_id (int): Faculty ID
+            new_status (bool): New status (True = Available, False = Unavailable)
+        """
+        try:
+            # Find the faculty card in the grid
+            for i in range(self.faculty_grid.count()):
+                container_widget = self.faculty_grid.itemAt(i).widget()
+                if not container_widget:
+                    continue
+                    
+                # Get the faculty card from the container (which is in a QHBoxLayout)
+                container_layout = container_widget.layout()
+                if not container_layout or container_layout.count() == 0:
+                    continue
+                    
+                faculty_card = container_layout.itemAt(0).widget()
+                if not faculty_card:
+                    continue
+                
+                # Check if this is the right faculty card
+                if faculty_card.faculty_data.get('id') == faculty_id:
+                    # Update the card status
+                    status_text = "Available" if new_status else "Unavailable"
+                    
+                    # Update faculty data
+                    faculty_card.faculty_data['available'] = new_status
+                    faculty_card.faculty_data['status'] = status_text
+                    
+                    # Update card appearance
+                    object_name = "faculty_card_available" if new_status else "faculty_card_unavailable"
+                    faculty_card.setObjectName(object_name)
+                    faculty_card.setStyleSheet("") # Force style refresh
+                    
+                    # Update status display in the card
+                    for j in range(faculty_card.layout().count()):
+                        layout_item = faculty_card.layout().itemAt(j)
+                        if isinstance(layout_item, QHBoxLayout):
+                            for k in range(layout_item.count()):
+                                item = layout_item.itemAt(k).widget()
+                                if isinstance(item, QLabel) and hasattr(item, 'text'):
+                                    if item.text() == "Available" or item.text() == "Unavailable":
+                                        # Found status label, update it
+                                        if new_status:
+                                            item.setText("Available")
+                                            item.setStyleSheet("font-size: 12pt; color: #27ae60; border: none; padding: 0; margin: 0; font-weight: 500;")
+                                        else:
+                                            item.setText("Unavailable")
+                                            item.setStyleSheet("font-size: 12pt; color: #e74c3c; border: none; padding: 0; margin: 0; font-weight: 500;")
+                    
+                    # Enable/disable request button based on availability
+                    for j in range(faculty_card.layout().count()):
+                        item = faculty_card.layout().itemAt(j).widget()
+                        if isinstance(item, QPushButton) and "Request Consultation" in item.text():
+                            item.setEnabled(new_status)
+                    
+                    logger.debug(f"Updated faculty card for ID {faculty_id} to status: {status_text}")
+                    return True
+            
+            # If we get here, the faculty card wasn't found
+            # This is normal if the current view doesn't show this faculty
+            logger.debug(f"Faculty card for ID {faculty_id} not found in current view")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error updating faculty card status: {e}")
+            return False

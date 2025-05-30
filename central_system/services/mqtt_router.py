@@ -182,6 +182,7 @@ class MQTTRouter:
             ],
             priority=MessagePriority.HIGH
         ))
+        self.add_handler(r"consultease/faculty/\d+/(status|mac_status)", self._handle_faculty_status_update)
         
         # Consultation requests
         self.add_route(MessageRoute(
@@ -482,6 +483,52 @@ class MQTTRouter:
                 }
                 for route in self.routes.values()
             ]
+
+    def _handle_faculty_status_update(self, topic: str, payload: Any):
+        """Handle faculty status updates and update the database."""
+        try:
+            logger.debug(f"Handling faculty status update for topic {topic}: {payload}")
+            # Extract faculty_id from topic
+            match = re.search(r"consultease/faculty/(\d+)/status", topic)
+            if not match:
+                match = re.search(r"consultease/faculty/(\d+)/mac_status", topic) # Check mac_status topic as well
+            
+            if match:
+                faculty_id = int(match.group(1))
+                status_str = payload.get("status", "").upper()
+                # Detailed status can also be used if needed
+                # detailed_status_str = payload.get("detailed_status", "").upper()
+
+                availability = None
+                if status_str == "AVAILABLE" or status_str == "PRESENT":
+                    availability = "Available"
+                elif status_str == "AWAY" or status_str == "OFFLINE": # Consider AWAY and OFFLINE as Unavailable
+                    availability = "Unavailable"
+                elif "BUSY" in status_str: # If status contains BUSY
+                    availability = "Busy"
+                
+                if availability:
+                    from ..models.faculty import Faculty  # Delayed import
+                    from ..models.base import get_db # Delayed import
+
+                    with get_db() as db:
+                        faculty = db.query(Faculty).filter(Faculty.id == faculty_id).first()
+                        if faculty:
+                            logger.info(f"Updating faculty {faculty_id} availability to {availability}")
+                            faculty.availability = availability
+                            faculty.last_seen = datetime.now() # Update last_seen timestamp
+                            db.commit()
+                            logger.info(f"Faculty {faculty_id} availability updated to {availability} in database.")
+                        else:
+                            logger.warning(f"Faculty with ID {faculty_id} not found in database.")
+                else:
+                    logger.warning(f"Could not determine availability from status: {status_str} for faculty {faculty_id}")
+            else:
+                logger.warning(f"Could not extract faculty_id from topic: {topic}")
+        except Exception as e:
+            logger.error(f"Error handling faculty status update for topic {topic}: {e}")
+            # Optionally, update error stats for this specific handler
+            self._update_error_stats(topic) # Use existing method if appropriate
 
 
 # Global router instance

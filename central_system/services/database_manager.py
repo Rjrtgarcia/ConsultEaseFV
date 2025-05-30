@@ -66,16 +66,9 @@ class DatabaseManager:
 
         # Statistics and monitoring
         self.stats = ConnectionStats()
-        self.health_check_interval = 30.0  # seconds
-        self.last_health_check = None
-        self.is_healthy = False
 
         # Thread safety
         self.lock = threading.RLock()
-
-        # Health monitoring
-        self.health_monitor_thread = None
-        self.monitoring_enabled = False
 
         logger.info("Database manager initialized")
 
@@ -133,11 +126,7 @@ class DatabaseManager:
                 # Test initial connection
                 if self._test_connection():
                     self.is_initialized = True
-                    self.is_healthy = True
                     logger.info("Database manager initialized successfully")
-
-                    # Start health monitoring
-                    self.start_health_monitoring()
                     return True
                 else:
                     logger.error("Failed to establish initial database connection")
@@ -174,20 +163,15 @@ class DatabaseManager:
                     # Create session
                     session = self.SessionLocal()
 
-                    # Test session with health check
-                    if self._test_session_health(session):
-                        self.stats.total_connections += 1
-                        self.stats.active_connections += 1
-                        self.stats.last_connection_time = datetime.now()
+                    self.stats.total_connections += 1
+                    self.stats.active_connections += 1
+                    self.stats.last_connection_time = datetime.now()
 
-                        if force_new:
-                            session.expire_all()
+                    if force_new:
+                        session.expire_all()
 
-                        logger.debug(f"Database session acquired (attempt {attempt + 1})")
-                        return session
-                    else:
-                        session.close()
-                        raise DatabaseConnectionError("Session health check failed")
+                    logger.debug(f"Database session acquired (attempt {attempt + 1})")
+                    return session
 
             except Exception as e:
                 last_error = e
@@ -264,27 +248,6 @@ class DatabaseManager:
             logger.error(f"Query execution failed: {e}")
             raise
 
-    def start_health_monitoring(self):
-        """Start health monitoring thread."""
-        if self.monitoring_enabled:
-            return
-
-        self.monitoring_enabled = True
-        self.health_monitor_thread = threading.Thread(
-            target=self._health_monitor_loop,
-            name="DatabaseHealthMonitor",
-            daemon=True
-        )
-        self.health_monitor_thread.start()
-        logger.info("Database health monitoring started")
-
-    def stop_health_monitoring(self):
-        """Stop health monitoring thread."""
-        self.monitoring_enabled = False
-        if self.health_monitor_thread and self.health_monitor_thread.is_alive():
-            self.health_monitor_thread.join(timeout=5.0)
-        logger.info("Database health monitoring stopped")
-
     def get_health_status(self) -> Dict[str, Any]:
         """
         Get database health status.
@@ -305,9 +268,7 @@ class DatabaseManager:
                 }
 
             return {
-                'is_healthy': self.is_healthy,
                 'is_initialized': self.is_initialized,
-                'last_health_check': self.last_health_check.isoformat() if self.last_health_check else None,
                 'stats': {
                     'total_connections': self.stats.total_connections,
                     'active_connections': self.stats.active_connections,
@@ -332,40 +293,6 @@ class DatabaseManager:
             logger.error(f"Database connection test failed: {e}")
             return False
 
-    def _test_session_health(self, session: Session) -> bool:
-        """Test session health."""
-        try:
-            result = session.execute(text("SELECT 1 as health_check"))
-            row = result.fetchone()
-            return row and row[0] == 1
-        except Exception as e:
-            logger.debug(f"Session health check failed: {e}")
-            return False
-
-    def _health_monitor_loop(self):
-        """Health monitoring loop."""
-        while self.monitoring_enabled:
-            try:
-                current_time = datetime.now()
-
-                # Check if health check is due
-                if (not self.last_health_check or
-                    current_time - self.last_health_check >= timedelta(seconds=self.health_check_interval)):
-
-                    self.is_healthy = self._test_connection()
-                    self.last_health_check = current_time
-
-                    if not self.is_healthy:
-                        logger.warning("Database health check failed")
-                        # Try to reinitialize if unhealthy
-                        self._reinitialize_engine()
-
-                time.sleep(5.0)  # Check every 5 seconds
-
-            except Exception as e:
-                logger.error(f"Error in database health monitor: {e}")
-                time.sleep(10.0)  # Wait longer on error
-
     def _reinitialize_engine(self):
         """Reinitialize database engine."""
         try:
@@ -378,7 +305,6 @@ class DatabaseManager:
 
                 # Reset state
                 self.is_initialized = False
-                self.is_healthy = False
 
                 # Reinitialize
                 self.initialize()
@@ -415,9 +341,6 @@ class DatabaseManager:
         """Shutdown database manager."""
         logger.info("Shutting down database manager...")
 
-        # Stop health monitoring
-        self.stop_health_monitoring()
-
         # Dispose of engine
         with self.lock:
             if self.engine:
@@ -426,62 +349,68 @@ class DatabaseManager:
 
             self.SessionLocal = None
             self.is_initialized = False
-            self.is_healthy = False
 
         logger.info("Database manager shutdown complete")
 
 
-# Global database manager instance
-_database_manager: Optional[DatabaseManager] = None
+# Singleton instance
+_db_manager: Optional[DatabaseManager] = None
+_db_manager_lock = threading.Lock()
 
 
 def get_database_manager() -> DatabaseManager:
-    """Get or create global database manager instance."""
-    global _database_manager
-    if _database_manager is None:
-        from ..utils.config_manager import get_config
-
-        # Get database configuration
-        db_config = get_config('database', {})
-        database_url = _build_database_url(db_config)
-
-        _database_manager = DatabaseManager(
-            database_url=database_url,
-            pool_size=db_config.get('pool_size', 5),
-            max_overflow=db_config.get('max_overflow', 10),
-            pool_timeout=db_config.get('pool_timeout', 30),
-            pool_recycle=db_config.get('pool_recycle', 1800)
-        )
-
-        # Initialize the manager
-        _database_manager.initialize()
-
-    return _database_manager
+    """
+    Get the singleton database manager instance.
+    Initializes it if not already done.
+    """
+    global _db_manager
+    if _db_manager is None:
+        with _db_manager_lock:
+            if _db_manager is None:
+                from ..core.config import settings  # Delayed import for config
+                db_url = _build_database_url(settings.DATABASE)
+                _db_manager = DatabaseManager(
+                    database_url=db_url,
+                    pool_size=settings.DATABASE.get("POOL_SIZE", 5),
+                    max_overflow=settings.DATABASE.get("MAX_OVERFLOW", 10),
+                    pool_timeout=settings.DATABASE.get("POOL_TIMEOUT", 30),
+                    pool_recycle=settings.DATABASE.get("POOL_RECYCLE", 1800)
+                )
+                if not _db_manager.initialize():
+                    logger.critical("Failed to initialize the database manager.")
+                    # Depending on the application's needs, you might want to raise an exception here
+                    # or handle it in a way that allows the application to start in a degraded mode.
+    return _db_manager
 
 
 def _build_database_url(db_config: Dict[str, Any]) -> str:
-    """Build database URL from configuration."""
-    db_type = db_config.get('type', 'sqlite')
-
-    if db_type == 'sqlite':
-        db_name = db_config.get('name', 'consultease.db')
-        return f"sqlite:///{db_name}"
-    elif db_type == 'postgresql':
-        host = db_config.get('host', 'localhost')
-        port = db_config.get('port', 5432)
-        name = db_config.get('name', 'consultease')
-        user = db_config.get('user', '')
-        password = db_config.get('password', '')
-
-        if user and password:
-            return f"postgresql://{user}:{password}@{host}:{port}/{name}"
-        else:
-            return f"postgresql://{host}:{port}/{name}"
+    """
+    Build database URL from configuration.
+    Supports SQLite and PostgreSQL.
+    """
+    db_type = db_config.get("TYPE", "sqlite")
+    if db_type == "sqlite":
+        db_path = db_config.get("PATH", "./consultease.db")
+        # Ensure the path is absolute for SQLite if it's a file-based DB
+        import os
+        if not db_path.startswith("/") and ":memory:" not in db_path:
+            db_path = os.path.abspath(db_path)
+        return f"sqlite:///{db_path}"
+    elif db_type == "postgresql":
+        user = db_config.get("USER", "postgres")
+        password = db_config.get("PASSWORD", "postgres")
+        host = db_config.get("HOST", "localhost")
+        port = db_config.get("PORT", 5432)
+        db_name = db_config.get("NAME", "consultease")
+        return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
 
 
 def set_database_manager(manager: DatabaseManager):
-    """Set global database manager instance."""
-    global _database_manager
-    _database_manager = manager
+    """
+    Set a custom database manager instance (primarily for testing).
+    """
+    global _db_manager
+    with _db_manager_lock:
+        _db_manager = manager
