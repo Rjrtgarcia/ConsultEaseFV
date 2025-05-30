@@ -1490,7 +1490,9 @@ class DashboardWindow(BaseWindow):
             faculty_controller = FacultyController()
 
             # Get all faculty members
+            logger.info("Attempting to call faculty_controller.get_all_faculty()")
             faculties = faculty_controller.get_all_faculty()
+            logger.info(f"Call to faculty_controller.get_all_faculty() completed. Found {len(faculties) if faculties is not None else 'None'} faculties.")
 
             logger.info(f"Initial load: Found {len(faculties)} faculty members")
 
