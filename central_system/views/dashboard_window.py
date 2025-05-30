@@ -6,7 +6,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QPixmap
 
 import os
-import logging
+import time
 from .base_window import BaseWindow
 from .consultation_panel import ConsultationPanel
 from ..utils.ui_components import FacultyCard
@@ -1019,8 +1019,7 @@ class DashboardWindow(BaseWindow):
             self._last_faculty_hash = self._extract_faculty_data(faculties)
 
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
+            # Ensure no local logger definition or import here
             logger.error(f"Error filtering faculty: {str(e)}")
             self.show_notification("Error filtering faculty list", "error")
 
@@ -1083,12 +1082,6 @@ class DashboardWindow(BaseWindow):
                 self.faculty_scroll.verticalScrollBar().setValue(current_scroll_position)
 
             # Also refresh consultation history if student is logged in, but less frequently
-            import time
-
-            # Initialize last refresh time if not set
-            if self.student and not hasattr(self, '_last_history_refresh'):
-                self._last_history_refresh = time.time()
-
             current_time = time.time()
             # Only refresh history every 3 minutes (180 seconds) - increased from 2 minutes
             if self.student and (current_time - getattr(self, '_last_history_refresh', 0) > 180):
@@ -1096,8 +1089,7 @@ class DashboardWindow(BaseWindow):
                 self._last_history_refresh = current_time
 
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
+            # Ensure no local logger definition or import here
             logger.error(f"Error refreshing faculty status: {str(e)}")
 
             # Hide loading indicator on error

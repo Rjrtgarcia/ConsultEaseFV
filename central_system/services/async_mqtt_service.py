@@ -492,6 +492,8 @@ class AsyncMQTTService:
                     
                     if reconnect_attempts < self.max_reconnect_attempts:
                         logger.info(f"Attempting to reconnect to MQTT broker (attempt {reconnect_attempts + 1})")
+                        logger.debug("Re-initializing MQTT client before reconnect attempt.")
+                        self._initialize_client() # Ensure a fresh client instance
                         self.connect()  # This submits a task to self.executor
                         reconnect_attempts += 1
                         # Wait for reconnect_delay before the next check or attempt

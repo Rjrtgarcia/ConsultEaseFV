@@ -58,308 +58,156 @@ class FacultyController:
         self.callbacks.append(callback)
         logger.info(f"Registered Faculty controller callback: {callback.__name__}")
 
-    def _notify_callbacks(self, faculty):
+    def _notify_callbacks(self, faculty_data):
         """
         Notify all registered callbacks with the updated faculty information.
 
         Args:
-            faculty (Faculty): Updated faculty object
+            faculty_data (dict): Updated faculty data dictionary
         """
         for callback in self.callbacks:
             try:
-                callback(faculty)
+                callback(faculty_data) # Pass the dictionary
             except Exception as e:
                 logger.error(f"Error in Faculty controller callback: {str(e)}")
 
     def handle_faculty_status_update(self, topic, data):
-        """
-        Handle faculty status update from MQTT.
-
-        Args:
-            topic (str): MQTT topic
-            data (dict or str): Status update data
-        """
         logger.info(f"🔄 MQTT STATUS UPDATE - Topic: {topic}, Data: {data}, Type: {type(data)}")
 
         faculty_id = None
         status = None
-        faculty_name = None
+        # faculty_name = None # Not directly used for update_faculty_status call
 
-        # Handle different topic formats
+        faculty_dict_for_callbacks = None # Initialize a variable to hold the dict for callbacks
+
         if topic.endswith("/mac_status"):
-            # This is a MAC address status update from the faculty desk unit
-            # Extract faculty ID from topic: consultease/faculty/{faculty_id}/mac_status
             try:
                 faculty_id = int(topic.split("/")[2])
-
                 if isinstance(data, dict):
                     status_str = data.get("status", "")
                     detected_mac = data.get("mac", "")
+                    if status_str == "faculty_present": status = True
+                    elif status_str == "faculty_absent": status = False
+                    else: logger.warning(f"Unknown MAC status: {status_str}"); return
 
-                    if status_str == "faculty_present":
-                        status = True
-                        logger.info(f"Faculty {faculty_id} detected via MAC address: {detected_mac}")
-                    elif status_str == "faculty_absent":
-                        status = False
-                        logger.info(f"Faculty {faculty_id} no longer detected via MAC address")
-                    else:
-                        logger.warning(f"Unknown MAC status: {status_str}")
-                        return
+                    faculty_dict_for_callbacks = self.update_faculty_status(faculty_id, status)
 
-                    # Update faculty status in database
-                    faculty_dict = self.update_faculty_status(faculty_id, status)
-
-                    if faculty_dict:
-                        # Store the detected MAC address if present
+                    if faculty_dict_for_callbacks:
                         if detected_mac and status:
                             normalized_mac = Faculty.normalize_mac_address(detected_mac)
-                            if normalized_mac != faculty_dict.get('ble_id'): 
-                                logger.info(f"Updating faculty {faculty_id} BLE ID from {faculty_dict.get('ble_id')} to {normalized_mac}")
-                                self.update_faculty_ble_id(faculty_id, normalized_mac) # Use existing method
-
-                        # For callbacks that expect a Faculty object, re-fetch it.
-                        # This ensures they get an attached object if they need to lazy-load.
-                        # Callbacks should ideally be refactored to accept dicts if possible.
-                        db_callback_session = get_db()
-                        try:
-                            faculty_obj_for_callback = db_callback_session.query(Faculty).filter(Faculty.id == faculty_id).first()
-                            if faculty_obj_for_callback:
-                                self._notify_callbacks(faculty_obj_for_callback)
-                        finally:
-                            db_callback_session.close()
-
-                        # Publish notification
+                            if normalized_mac != faculty_dict_for_callbacks.get('ble_id'): 
+                                self.update_faculty_ble_id(faculty_id, normalized_mac)
+                        # self._notify_callbacks is called at the end if faculty_dict_for_callbacks is set
+                        # Publish notification logic can use faculty_dict_for_callbacks
                         try:
                             notification = {
                                 'type': 'faculty_mac_status',
-                                'faculty_id': faculty_dict['id'],
-                                'faculty_name': faculty_dict['name'],
+                                'faculty_id': faculty_dict_for_callbacks['id'],
+                                'faculty_name': faculty_dict_for_callbacks['name'],
                                 'status': status,
                                 'detected_mac': detected_mac,
-                                'timestamp': faculty_dict['last_seen']
+                                'timestamp': faculty_dict_for_callbacks['last_seen']
                             }
                             publish_mqtt_message(MQTTTopics.SYSTEM_NOTIFICATIONS, notification)
                         except Exception as e:
                             logger.error(f"Error publishing MAC status notification: {str(e)}")
-
-                    return
-
+                    # return # Don't return early, let common callback notification run
             except (ValueError, IndexError) as e:
                 logger.error(f"Error parsing MAC status topic {topic}: {str(e)}")
-                return
+                return # Return on parsing error
 
         elif topic == MQTTTopics.LEGACY_FACULTY_STATUS:
-            # This is from the faculty desk unit using the legacy topic
-            # Check if this is a string message (keychain_connected or keychain_disconnected)
-            if isinstance(data, str):
-                if data == "keychain_connected" or data == "faculty_present":
-                    status = True
-                    # Extract faculty name from client ID (DeskUnit_FacultyName)
-                    # This is more flexible than hardcoding a specific faculty name
-                    db = get_db()
+            db_session_legacy = get_db() # Session for fetching faculty if needed
+            try:
+                faculty_to_update = None
+                if isinstance(data, str):
+                    if data == "keychain_connected" or data == "faculty_present": status = True
+                    elif data == "keychain_disconnected" or data == "faculty_absent": status = False
+                    else: logger.warning(f"Unknown legacy status string: {data}"); db_session_legacy.close(); return
+                    
+                    # Try to find faculty with BLE configured
+                    faculty_to_update = db_session_legacy.query(Faculty).filter(Faculty.ble_id.isnot(None)).first()
+                    if faculty_to_update: faculty_id = faculty_to_update.id
+                    else: logger.error("No faculty with BLE configuration found for legacy update"); db_session_legacy.close(); return
 
-                    # Try to find the faculty from the MQTT client ID if available
-                    # If not available, look for faculty with BLE beacons configured
-                    faculty = None
-                elif data == "keychain_disconnected" or data == "faculty_absent":
-                    status = False
-                    db = get_db()
-                    faculty = None
+                elif isinstance(data, dict):
+                    status = data.get('status', False)
+                    faculty_id_from_data = data.get('faculty_id')
+                    faculty_name_from_data = data.get('faculty_name')
+                    if faculty_id_from_data:
+                        faculty_id = faculty_id_from_data
+                    elif faculty_name_from_data:
+                        faculty_to_update = db_session_legacy.query(Faculty).filter(Faculty.name == faculty_name_from_data).first()
+                        if faculty_to_update: faculty_id = faculty_to_update.id
+                        else: logger.error(f"Faculty '{faculty_name_from_data}' not found for legacy update"); db_session_legacy.close(); return
+                    else: # Fallback to any BLE configured faculty
+                        faculty_to_update = db_session_legacy.query(Faculty).filter(Faculty.ble_id.isnot(None)).first()
+                        if faculty_to_update: faculty_id = faculty_to_update.id
+                        else: logger.error("No faculty identified for legacy JSON update"); db_session_legacy.close(); return
+                else: logger.error(f"Invalid data type for legacy status: {type(data)}"); db_session_legacy.close(); return
 
-                    # First, try to find any faculty with BLE configured and status=False
-                    # This assumes the BLE connection is for a faculty that was previously disconnected
-                    faculty = db.query(Faculty).filter(
-                        Faculty.ble_id.isnot(None),
-                        Faculty.status == False
-                    ).first()
+                if faculty_id is not None and status is not None:
+                    faculty_dict_for_callbacks = self.update_faculty_status(faculty_id, status)
+            finally:
+                db_session_legacy.close()
 
-                    if faculty:
-                        faculty_id = faculty.id
-                        faculty_name = faculty.name
-                        logger.info(f"BLE beacon connected for faculty desk unit (ID: {faculty_id}, Name: {faculty_name})")
-                    else:
-                        # If no disconnected faculty found, look for any faculty with BLE configured
-                        faculty = db.query(Faculty).filter(
-                            Faculty.ble_id.isnot(None)
-                        ).first()
-
-                        if faculty:
-                            faculty_id = faculty.id
-                            faculty_name = faculty.name
-                            logger.info(f"BLE beacon connected for faculty desk unit (ID: {faculty_id}, Name: {faculty_name})")
-                        else:
-                            logger.error("No faculty with BLE configuration found in database")
-                            return
-                elif data == "keychain_disconnected":
-                    status = False
-                    # Similar approach as above for finding the faculty
-                    db = get_db()
-
-                    # First, try to find any faculty with BLE configured and status=True
-                    # This assumes the BLE disconnection is for a faculty that was previously connected
-                    faculty = db.query(Faculty).filter(
-                        Faculty.ble_id.isnot(None),
-                        Faculty.status == True
-                    ).first()
-
-                    if faculty:
-                        faculty_id = faculty.id
-                        faculty_name = faculty.name
-                        logger.info(f"BLE beacon disconnected for faculty desk unit (ID: {faculty_id}, Name: {faculty_name})")
-                    else:
-                        # If no connected faculty found, look for any faculty with BLE configured
-                        faculty = db.query(Faculty).filter(
-                            Faculty.ble_id.isnot(None)
-                        ).first()
-
-                        if faculty:
-                            faculty_id = faculty.id
-                            faculty_name = faculty.name
-                            logger.info(f"BLE beacon disconnected for faculty desk unit (ID: {faculty_id}, Name: {faculty_name})")
-                        else:
-                            logger.error("No faculty with BLE configuration found in database")
-                            return
-            else:
-                # This is a JSON message
-                status = data.get('status', False)
-                faculty_id = data.get('faculty_id')
-                faculty_name = data.get('faculty_name')
-
-                if faculty_id is None and faculty_name is not None:
-                    # Try to find faculty by name
-                    db = get_db()
-                    faculty = db.query(Faculty).filter(Faculty.name == faculty_name).first()
-                    if faculty:
-                        faculty_id = faculty.id
-                    else:
-                        logger.error(f"Faculty '{faculty_name}' not found in database")
-                        return
-                elif faculty_id is None:
-                    # No faculty ID or name provided, try to find any faculty with BLE configured
-                    db = get_db()
-                    faculty = db.query(Faculty).filter(
-                        Faculty.ble_id.isnot(None)
-                    ).first()
-
-                    if faculty:
-                        faculty_id = faculty.id
-                        faculty_name = faculty.name
-                    else:
-                        logger.error("No faculty with BLE configuration found in database")
-                        return
-        else:
-            # Extract faculty ID from topic (e.g., "consultease/faculty/123/status")
+        else: # Standard topic format: consultease/faculty/{id}/status
             parts = topic.split('/')
-            if len(parts) != 4:
-                logger.error(f"Invalid topic format: {topic}")
-                return
+            if len(parts) == 4 and parts[0] == "consultease" and parts[1] == "faculty" and parts[3] == "status":
+                try:
+                    faculty_id = int(parts[2])
+                    if isinstance(data, dict):
+                        status = data.get('present') # Assuming 'present' field from log
+                        if status is None: # Fallback to 'status' field if 'present' is not there
+                           status = data.get('status')
+                        # Convert potential string "true"/"false" to boolean
+                        if isinstance(status, str):
+                            if status.lower() == 'true': status = True
+                            elif status.lower() == 'false': status = False
+                            else: logger.warning(f"Invalid status string value: {status}"); return
+                        
+                        if status is None: logger.warning(f"Status not found in data: {data}"); return
 
-            try:
-                faculty_id = int(parts[2])
-            except ValueError:
-                logger.error(f"Invalid faculty ID in topic: {parts[2]}")
-                return
+                        # Enhanced status details (optional)
+                        ntp_sync_status = data.get('ntp_sync_status')
+                        grace_period_active = data.get('in_grace_period')
+                        
+                        faculty_dict_for_callbacks = self.update_faculty_status(faculty_id, status)
+                        
+                        if faculty_dict_for_callbacks and (ntp_sync_status or grace_period_active is not None):
+                             # If update_faculty_status does not handle these, we might need another method call
+                             # For now, assume update_faculty_status is the primary source of truth for 'status'
+                             # and these are for logging or minor adjustments if needed later.
+                             logger.info(f"Faculty {faculty_id} enhanced info: NTP: {ntp_sync_status}, Grace: {grace_period_active}")
+                             # Potentially call: self._update_faculty_enhanced_status(faculty_id, status, ntp_sync_status, grace_period_active)
+                             # But this might cause another DB write. For now, focus on the main status update.
 
-            # Get status from data
-            if isinstance(data, dict):
-                logger.info(f"📊 Processing dict data for faculty {faculty_id}: {data}")
-
-                # Handle enhanced status data from updated faculty desk units
-                if 'present' in data:
-                    status = bool(data.get('present'))
-                    logger.info(f"✅ Found 'present' field: {data.get('present')} -> status: {status}")
-                elif 'status' in data:
-                    status_str = data.get('status', '').lower()
-                    logger.info(f"📝 Found 'status' field: {status_str}")
-                    if status_str in ['available', 'present', 'true']:
-                        status = True
-                    elif status_str in ['away', 'absent', 'false']:
-                        status = False
+                    elif isinstance(data, (bool, int)): # Direct status true/false or 1/0
+                        status = bool(data)
+                        faculty_dict_for_callbacks = self.update_faculty_status(faculty_id, status)
                     else:
-                        status = bool(data.get('status', False))
-                    logger.info(f"✅ Processed status string '{status_str}' -> status: {status}")
-                else:
-                    status = False
-                    logger.warning(f"⚠️ No 'present' or 'status' field found in data, defaulting to False")
-
-                faculty_name = data.get('faculty_name')
-                logger.info(f"👤 Faculty name from data: {faculty_name}")
-
-                # Extract enhanced status information
-                ntp_sync_status = data.get('ntp_sync_status', 'UNKNOWN')
-                grace_period_active = data.get('in_grace_period', False)
-                detailed_status = data.get('detailed_status', '')
-
-                # Update faculty with enhanced information
-                self._update_faculty_enhanced_status(faculty_id, status, ntp_sync_status, grace_period_active)
-
-                # Log enhanced status information
-                if grace_period_active:
-                    grace_remaining = data.get('grace_period_remaining', 0) // 1000  # Convert to seconds
-                    logger.info(f"Faculty {faculty_id} in grace period: {grace_remaining}s remaining")
-
-                if ntp_sync_status in ["FAILED", "SYNCING"]:
-                    logger.warning(f"Faculty {faculty_id} NTP sync issue: {ntp_sync_status}")
-
-                # Check if this is a BLE beacon status update (legacy support)
-                if 'keychain_connected' in data:
-                    status = True
-                    logger.info(f"BLE beacon connected for faculty {faculty_id}")
-                elif 'keychain_disconnected' in data:
-                    status = False
-                    logger.info(f"BLE beacon disconnected for faculty {faculty_id}")
+                        logger.error(f"Invalid data type for status: {type(data)} on topic {topic}")
+                        return
+                except ValueError:
+                    logger.error(f"Invalid faculty ID in topic: {parts[2]}")
+                    return
+                except IndexError:
+                    logger.error(f"Invalid topic format: {topic}")
+                    return
             else:
-                logger.error(f"Invalid data format for topic {topic}: {data}")
+                logger.warning(f"Unhandled MQTT topic in FacultyController: {topic}")
                 return
 
-        # If we couldn't determine faculty ID or status, return
-        if faculty_id is None or status is None:
-            logger.error(f"❌ Could not determine faculty ID ({faculty_id}) or status ({status}) from topic {topic} and data {data}")
-            return
-
-        logger.info(f"🎯 FINAL STATUS UPDATE - Faculty ID: {faculty_id}, Status: {status}, Topic: {topic}")
-
-        # Update faculty status in database
-        logger.info(f"💾 Attempting database update for faculty {faculty_id} with status {status}")
-        faculty = self.update_faculty_status(faculty_id, status)
-
-        if faculty:
-            logger.info(f"✅ Successfully updated faculty {faculty.name} (ID: {faculty.id}) status to {status}")
-
-            # Verify the update by checking current status
-            try:
-                from ..services.database_manager import get_database_manager
-                db_manager = get_database_manager()
-                with db_manager.get_session_context() as db:
-                    updated_faculty = db.query(Faculty).filter(Faculty.id == faculty_id).first()
-                    if updated_faculty:
-                        logger.info(f"🔍 Database verification: Faculty {updated_faculty.name} status is now {updated_faculty.status}")
-                    else:
-                        logger.error(f"🔍 Database verification failed: Faculty {faculty_id} not found")
-            except Exception as e:
-                logger.error(f"🔍 Database verification error: {e}")
-        else:
-            logger.error(f"❌ Failed to update faculty {faculty_id} status in database")
-
-        if faculty:
+        # Common actions after status update attempt
+        if faculty_dict_for_callbacks:
             # Notify consultation queue service about faculty status change
-            self.queue_service.update_faculty_status(faculty_id, status)
-
-            # Notify callbacks
-            self._notify_callbacks(faculty)
-
-            # Publish a notification about faculty availability using async MQTT
-            try:
-                notification = {
-                    'type': 'faculty_status',
-                    'faculty_id': faculty.id,
-                    'faculty_name': faculty.name,
-                    'status': status,
-                    'timestamp': faculty.last_seen.isoformat() if faculty.last_seen else None
-                }
-                publish_mqtt_message(MQTTTopics.SYSTEM_NOTIFICATIONS, notification)
-            except Exception as e:
-                logger.error(f"Error publishing faculty status notification: {str(e)}")
+            self.queue_service.update_faculty_status(faculty_dict_for_callbacks['id'], faculty_dict_for_callbacks['status'])
+            # Notify registered callbacks with the dictionary
+            self._notify_callbacks(faculty_dict_for_callbacks)
+            # Publish general notification (already handled by update_faculty_status via _publish_status_update_with_sequence_safe)
+            logger.info(f"Processed status update for faculty ID {faculty_dict_for_callbacks['id']}, new status: {faculty_dict_for_callbacks['status']}")
+        elif faculty_id is not None: # Log if update attempt was made but failed
+            logger.warning(f"Failed to get updated faculty dictionary for faculty ID {faculty_id} after status update attempt.")
 
     def update_faculty_status(self, faculty_id, status):
         """
