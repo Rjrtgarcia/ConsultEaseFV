@@ -8,6 +8,7 @@ import json
 import logging
 import threading
 import time
+import uuid  # Added import for uuid
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
 from typing import Dict, Callable, Optional, Any
@@ -79,7 +80,9 @@ class AsyncMQTTService:
     def _initialize_client(self):
         """Initialize MQTT client with callbacks."""
         try:
-            self.client = mqtt.Client()
+            # Generate a unique client ID
+            client_id = f"ConsultEaseClient_{uuid.uuid4()}"
+            self.client = mqtt.Client(client_id=client_id)
 
             # Set authentication if provided
             if self.username and self.password:
