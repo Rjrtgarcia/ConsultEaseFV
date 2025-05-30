@@ -412,29 +412,40 @@ class AsyncMQTTService:
 
         while self.running:
             try:
-                current_time = time.time()
-
-                # Check if we need to reconnect
-                if not self.is_connected and reconnect_attempts < self.max_reconnect_attempts:
-                    logger.info(f"Attempting to reconnect to MQTT broker (attempt {reconnect_attempts + 1})")
-                    self.connect()
-                    reconnect_attempts += 1
-                    time.sleep(self.reconnect_delay)
+                if not self.is_connected:
+                    if not self.running:  # Check if service is still running before attempting to reconnect
+                        break
+                    
+                    if reconnect_attempts < self.max_reconnect_attempts:
+                        logger.info(f"Attempting to reconnect to MQTT broker (attempt {reconnect_attempts + 1})")
+                        self.connect()  # This submits a task to self.executor
+                        reconnect_attempts += 1
+                        # Wait for reconnect_delay before the next check or attempt
+                        time.sleep(self.reconnect_delay)
+                        continue  # Re-evaluate conditions at the start of the loop
+                    else:
+                        logger.error(f"Max reconnection attempts ({self.max_reconnect_attempts}) reached. MQTT service remains disconnected.")
+                        # Sleep for a longer period to avoid busy-looping when max attempts are reached
+                        time.sleep(60) 
+                        continue
                 elif self.is_connected:
                     # Reset reconnect attempts on successful connection
                     reconnect_attempts = 0
-
+                    current_time = time.time()
                     # Update last ping time (ping functionality removed as paho-mqtt doesn't have ping method)
                     if current_time - self.last_ping > self.ping_interval:
                         # Just update the timestamp - the MQTT client handles keepalive automatically
                         self.last_ping = current_time
                         logger.debug("MQTT keepalive check - connection is active")
-
-                time.sleep(5)  # Check every 5 seconds
+                
+                # General check interval if connected or if waiting after max reconnect attempts
+                time.sleep(5)
 
             except Exception as e:
                 logger.error(f"Error in connection monitor: {e}")
-                time.sleep(10)
+                if not self.running:  # If an error occurs and we are stopping, exit the loop
+                    break
+                time.sleep(10)  # Wait longer after an unexpected error
 
     def register_topic_handler(self, topic: str, handler: Callable):
         """
