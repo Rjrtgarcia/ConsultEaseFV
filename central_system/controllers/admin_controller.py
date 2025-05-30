@@ -117,11 +117,13 @@ class AdminController:
     def is_first_time_setup(self):
         """
         Determine if this is a first-time setup (no admin accounts exist).
+        Always forces a refresh of the admin accounts check for reliable detection.
 
         Returns:
             bool: True if first-time setup is needed, False otherwise
         """
-        return not self.check_admin_accounts_exist()
+        # Force refresh the admin accounts check to ensure accurate detection
+        return not self.check_admin_accounts_exist(force_refresh=True)
 
     def create_admin_account(self, username, password, force_password_change=False):
         """

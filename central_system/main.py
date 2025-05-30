@@ -149,8 +149,13 @@ class ConsultEaseApp:
         self.admin_controller = AdminController()
         self.faculty_response_controller = FacultyResponseController()
 
-        # Ensure default admin exists
-        self.admin_controller.ensure_default_admin()
+        # Check if this is a first-time setup
+        if not self.admin_controller.is_first_time_setup():
+            # Only ensure default admin if this is not a first-time setup
+            # This allows the first-time setup dialog to work properly
+            self.admin_controller.ensure_default_admin()
+        else:
+            logger.info("First-time setup detected - skipping default admin creation")
         
         # Perform admin account verification after admin controller is initialized
         self._verify_admin_account_startup()

@@ -318,12 +318,12 @@ class AdminLoginWindow(BaseWindow):
                 logger.warning("⚠️  No admin controller available for first-time setup check")
                 return
 
-            # Check admin accounts exist
-            accounts_exist = self.admin_controller.check_admin_accounts_exist()
+            # Force refresh the admin accounts check to ensure accurate detection
+            accounts_exist = self.admin_controller.check_admin_accounts_exist(force_refresh=True)
             logger.info(f"📊 Admin accounts exist: {accounts_exist}")
 
-            # Check if first-time setup is needed
-            is_first_time = self.admin_controller.is_first_time_setup()
+            # Check if first-time setup is needed using the direct method
+            is_first_time = not accounts_exist
             logger.info(f"🎯 Is first-time setup: {is_first_time}")
 
             if is_first_time:
