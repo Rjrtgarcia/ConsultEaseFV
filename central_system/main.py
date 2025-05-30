@@ -231,8 +231,6 @@ class ConsultEaseApp:
             dependencies=[],
             startup_callback=self._start_database_service,
             shutdown_callback=self._stop_database_service,
-            health_check_callback=self._check_database_health,
-            health_check_interval=30.0,
             max_restart_attempts=3
         )
 
