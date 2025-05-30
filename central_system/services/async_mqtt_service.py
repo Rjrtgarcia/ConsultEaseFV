@@ -123,6 +123,12 @@ class AsyncMQTTService:
     def _on_disconnect(self, client, userdata, rc):
         """Handle MQTT disconnection."""
         self.is_connected = False
+        try:
+            self.client.loop_stop(force=True) # Force stop the network loop
+            logger.info("MQTT client network loop stopped.")
+        except Exception as e:
+            logger.error(f"Error stopping MQTT client loop: {e}")
+
         if rc != 0:
             logger.warning(f"Unexpected MQTT disconnection. Return code: {rc}")
         else:
