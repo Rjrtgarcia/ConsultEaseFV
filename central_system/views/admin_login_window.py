@@ -346,6 +346,13 @@ class AdminLoginWindow(BaseWindow):
         try:
             logger.info("🎭 Creating AdminAccountCreationDialog...")
             dialog = AdminAccountCreationDialog(self)
+            if self.admin_controller:
+                dialog.set_admin_controller(self.admin_controller)  # Pass the controller
+            else:
+                logger.error("AdminController not available in AdminLoginWindow when showing setup dialog.")
+                QMessageBox.critical(self, "Error", "Critical error: Admin controller not found. Cannot proceed with setup.")
+                return
+                
             logger.info("✅ AdminAccountCreationDialog created successfully")
 
             logger.info("🔗 Connecting account_created signal...")

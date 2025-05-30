@@ -22,7 +22,12 @@ class AdminAccountCreationDialog(QDialog):
         self.setModal(True)
         self.setWindowTitle("ConsultEase - First Time Setup")
         self.setMinimumSize(800, 700)
+        self.admin_controller = None  # Initialize admin_controller
         self.init_ui()
+
+    def set_admin_controller(self, admin_controller):
+        """Set the admin controller instance."""
+        self.admin_controller = admin_controller
 
     def init_ui(self):
         """Initialize the user interface."""
@@ -425,8 +430,12 @@ class AdminAccountCreationDialog(QDialog):
         return requirements
 
     def create_account(self):
-        """Create the admin account."""
+        """Create the admin account using the AdminController."""
         try:
+            if not self.admin_controller:
+                self.show_error("Critical error: Admin controller not available. Cannot create account.")
+                return
+
             # Show progress
             self.progress_frame.setVisible(True)
             self.progress_bar.setRange(0, 0)  # Indeterminate progress
@@ -436,39 +445,13 @@ class AdminAccountCreationDialog(QDialog):
             # Get form data
             username = self.username_input.text().strip()
             password = self.password_input.text()
-            # Note: Email removed as Admin model doesn't support it
-
-            # Import here to avoid circular imports
-            from ..models.base import get_db
-            from ..models.admin import Admin
-
-            # Check if username already exists
-            db = get_db()
-            existing_admin = db.query(Admin).filter(Admin.username == username).first()
-            if existing_admin:
-                self.show_error("Username already exists. Please choose a different username.")
-                return
-
-            # Create the admin account
-            self.progress_label.setText("Hashing password...")
-            password_hash, salt = Admin.hash_password(password)
 
             self.progress_label.setText("Creating admin account...")
-            new_admin = Admin(
-                username=username,
-                password_hash=password_hash,
-                salt=salt,
-                is_active=True,
-                force_password_change=False  # No need to force change for user-created account
-            )
+            
+            # Use AdminController to create the account
+            result = self.admin_controller.create_admin_account(username, password, force_password_change=False)
 
-            db.add(new_admin)
-            db.commit()
-
-            self.progress_label.setText("Verifying account...")
-
-            # Test the account
-            if new_admin.check_password(password):
+            if result.get('success'):
                 self.progress_label.setText("Account created successfully!")
                 self.progress_bar.setRange(0, 100)
                 self.progress_bar.setValue(100)
@@ -476,16 +459,15 @@ class AdminAccountCreationDialog(QDialog):
                 logger.info(f"First admin account created successfully: {username}")
 
                 # Emit success signal with admin info
-                admin_info = {
-                    'id': new_admin.id,
-                    'username': new_admin.username
-                }
+                admin_info = result.get('admin')
+                if not admin_info:
+                     admin_info = {'username': username} # Fallback if admin key is missing
 
                 # Show success message
                 QTimer.singleShot(1000, lambda: self.show_success_and_close(admin_info))
-
             else:
-                self.show_error("Account created but password verification failed. Please try again.")
+                error_message = result.get('error', "An unknown error occurred.")
+                self.show_error(f"Failed to create account: {error_message}")
 
         except Exception as e:
             logger.error(f"Error creating admin account: {e}")
