@@ -239,19 +239,64 @@ class AsyncMQTTService:
 
     def stop(self):
         """Stop the asynchronous MQTT service."""
-        self.running = False
+        if not self.running:
+            logger.info("Asynchronous MQTT service is already stopped or not running.")
+            return
 
-        # Disconnect from broker
-        if self.client and self.is_connected:
-            self.client.disconnect()
+        logger.info("Stopping Asynchronous MQTT service...")
+        self.running = False  # Signal all loops to terminate
 
+        # Disconnect from broker first to stop new incoming messages and allow loop_stop
+        if self.client:
+            try:
+                if self.is_connected:
+                    self.client.disconnect()
+                    logger.info("MQTT client disconnected command issued.")
+                # Stop the Paho client's network loop. This is important to allow threads to exit.
+                self.client.loop_stop(force=True)
+                logger.info("MQTT client network loop stopped.")
+            except Exception as e:
+                logger.error(f"Error during MQTT client disconnection or loop_stop: {e}")
+
+        # Wait for the publisher thread to finish
+        if self.publish_thread and self.publish_thread.is_alive():
+            try:
+                logger.debug("Waiting for publisher thread to join...")
+                self.publish_queue.put(None) # Send sentinel to unblock queue.get()
+                self.publish_thread.join(timeout=5.0)
+                if self.publish_thread.is_alive():
+                    logger.warning("Publisher thread did not join in time.")
+                else:
+                    logger.info("Publisher thread joined.")
+            except Exception as e:
+                logger.error(f"Error joining publisher thread: {e}")
+
+        # Wait for the connection monitor thread to finish
+        if self.connection_monitor_thread and self.connection_monitor_thread.is_alive():
+            try:
+                logger.debug("Waiting for connection monitor thread to join...")
+                self.connection_monitor_thread.join(timeout=5.0)
+                if self.connection_monitor_thread.is_alive():
+                    logger.warning("Connection monitor thread did not join in time.")
+                else:
+                    logger.info("Connection monitor thread joined.")
+            except Exception as e:
+                logger.error(f"Error joining connection monitor thread: {e}")
+        
         # Shutdown thread pool
+        # This should be one of the last things to allow threads to finish their work
+        logger.debug("Shutting down executor...")
         self.executor.shutdown(wait=True)
+        logger.info("Executor shutdown complete.")
 
-        logger.info("Asynchronous MQTT service stopped")
+        logger.info("Asynchronous MQTT service stopped successfully.")
 
     def connect(self):
         """Connect to MQTT broker asynchronously."""
+        if not self.running:
+            logger.warning("MQTT service is not running, connect call ignored.")
+            return
+
         if not self.client:
             self._initialize_client()
 
@@ -372,6 +417,10 @@ class AsyncMQTTService:
             try:
                 # Get message from queue with timeout
                 message = self.publish_queue.get(timeout=1)
+                
+                if message is None: # Sentinel value to exit
+                    logger.debug("Publish worker received sentinel, exiting.")
+                    break
 
                 if not self.is_connected:
                     logger.warning(f"Cannot publish to {message['topic']}: not connected")
