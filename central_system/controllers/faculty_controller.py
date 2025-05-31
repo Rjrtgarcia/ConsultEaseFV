@@ -291,6 +291,24 @@ class FacultyController:
                 # Session context manager will attempt to commit here if no exceptions occurred
                 logger.info(f"DB session context exited for faculty {faculty_id}. Commit should have occurred if changes were made.")
 
+                # <<< START VERIFICATION BLOCK >>>
+                if faculty_data: # Only verify if an update was attempted and faculty_data was prepared
+                    try:
+                        logger.info(f"Verifying faculty {faculty_id} status post-commit...")
+                        with db_manager.get_session_context() as verify_db: # Use a new session from the manager
+                            verified_faculty = verify_db.query(Faculty).filter(Faculty.id == faculty_id).first()
+                            if verified_faculty:
+                                logger.info(f"Post-commit verification: Faculty ID {faculty_id}, Name: {verified_faculty.name}, DB Status: {verified_faculty.status}. Expected status: {status}")
+                                if verified_faculty.status != status:
+                                    logger.error(f"POST-COMMIT STATUS MISMATCH for faculty {faculty_id}! DB has {verified_faculty.status}, expected {status}. COMMIT LIKELY FAILED OR WAS OVERWRITTEN.")
+                                else:
+                                    logger.info(f"Post-commit verification successful for faculty {faculty_id}. Status in DB is {verified_faculty.status}.")
+                            else:
+                                logger.error(f"Post-commit verification FAILED: Faculty {faculty_id} not found in DB after supposed update.")
+                    except Exception as verify_e:
+                        logger.error(f"Exception during post-commit verification for faculty {faculty_id}: {str(verify_e)}")
+                # <<< END VERIFICATION BLOCK >>>
+
                 # Invalidate faculty cache when status changes (outside transaction)
                 logger.debug(f"Invalidating cache for faculty {faculty_id} post-update.")
                 invalidate_faculty_cache()

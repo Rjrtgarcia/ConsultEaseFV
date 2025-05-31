@@ -1012,6 +1012,11 @@ class DashboardWindow(BaseWindow):
             # Update the grid
             self.populate_faculty_grid(faculties)
 
+            # Also update the consultation panel with the latest faculty options
+            if hasattr(self, 'consultation_panel'):
+                self.consultation_panel.set_faculty_options(faculties)
+                logger.debug("Refreshed consultation panel faculty options in refresh_faculty_status")
+
             # Ensure scroll area starts at the top
             if hasattr(self, 'faculty_scroll') and self.faculty_scroll:
                 self.faculty_scroll.verticalScrollBar().setValue(0)
@@ -1077,6 +1082,11 @@ class DashboardWindow(BaseWindow):
 
             # Update the grid only if there are changes or this is the first load
             self.populate_faculty_grid(faculties)
+
+            # Also update the consultation panel with the latest faculty options
+            if hasattr(self, 'consultation_panel'):
+                self.consultation_panel.set_faculty_options(faculties)
+                logger.debug("Refreshed consultation panel faculty options in refresh_faculty_status")
 
             # Restore previous scroll position instead of always scrolling to top
             if hasattr(self, 'faculty_scroll') and self.faculty_scroll:
@@ -1607,7 +1617,15 @@ class DashboardWindow(BaseWindow):
                 return
                 
             # Find and update the corresponding faculty card
-            self.update_faculty_card_status(faculty_id, new_status)
+            card_updated = self.update_faculty_card_status(faculty_id, new_status)
+
+            # If the card was visible and updated, or even if not (status might affect filters),
+            # trigger a full refresh to ensure data consistency across the dashboard.
+            # This will re-fetch from DB, re-populate grid, and update consultation panel options.
+            logger.debug(f"Realtime update for faculty {faculty_id} processed, card_updated: {card_updated}. Triggering full UI refresh.")
+            # Use QTimer.singleShot to schedule the refresh in the next event loop iteration.
+            # This can help coalesce multiple rapid updates and avoid immediate heavy refresh on every single MQTT message.
+            QTimer.singleShot(100, self.refresh_faculty_status) # 100ms delay
             
         except Exception as e:
             logger.error(f"Error handling real-time status update: {e}")
