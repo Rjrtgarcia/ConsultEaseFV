@@ -1606,6 +1606,7 @@ class DashboardWindow(BaseWindow):
             data (dict): Status update data
         """
         try:
+            logger.info(f"[MQTT DASHBOARD HANDLER] handle_realtime_status_update - Topic: {topic}, Data: {data}")
             logger.debug(f"Received real-time faculty status update: {data}")
             
             # Extract faculty ID and status
@@ -1639,6 +1640,7 @@ class DashboardWindow(BaseWindow):
             data (dict): Notification data
         """
         try:
+            logger.info(f"[MQTT DASHBOARD HANDLER] handle_system_notification - Topic: {topic}, Data: {data}")
             # Check if this is a faculty status notification
             if data.get('type') == 'faculty_status':
                 faculty_id = data.get('faculty_id')
@@ -1646,7 +1648,10 @@ class DashboardWindow(BaseWindow):
                 
                 if faculty_id is not None and new_status is not None:
                     # Update the faculty card
-                    self.update_faculty_card_status(faculty_id, new_status)
+                    card_updated = self.update_faculty_card_status(faculty_id, new_status)
+                    logger.debug(f"System notification for faculty {faculty_id} status processed, card_updated: {card_updated}. Triggering full UI refresh.")
+                    # Schedule a full refresh to ensure data consistency
+                    QTimer.singleShot(100, self.refresh_faculty_status) # ADDED REFRESH CALL
         except Exception as e:
             logger.error(f"Error handling system notification: {e}")
 
