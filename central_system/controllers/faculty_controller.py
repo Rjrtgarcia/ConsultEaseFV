@@ -247,7 +247,16 @@ class FacultyController:
                     # Check if status actually changed to avoid unnecessary updates
                     if faculty.status == status:
                         logger.debug(f"Faculty {faculty.name} (ID: {faculty.id}) status unchanged: {status}")
-                        return faculty
+                        # Return dictionary representation even if unchanged
+                        return {
+                            'id': faculty.id,
+                            'name': faculty.name,
+                            'department': faculty.department,
+                            'status': faculty.status,
+                            'ble_id': faculty.ble_id,
+                            'last_seen': faculty.last_seen.isoformat() if faculty.last_seen else None,
+                            'version': getattr(faculty, 'version', 1)
+                        }
 
                     # Store previous status for logging
                     previous_status = faculty.status

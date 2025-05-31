@@ -972,7 +972,7 @@ class ConsultEaseApp:
         if hasattr(self, 'admin_dashboard_window') and self.admin_dashboard_window and self.admin_dashboard_window.isVisible():
             try:
                 logger.info("Refreshing admin dashboard faculty table")
-                self.admin_dashboard_window.refresh_data()
+                self.admin_dashboard_window.handle_faculty_updated()
             except Exception as e:
                 logger.error(f"Error refreshing admin dashboard: {e}")
 

@@ -1600,13 +1600,13 @@ class DashboardWindow(BaseWindow):
         except Exception as e:
             logger.error(f"Error handling system notification: {e}")
 
-    def update_faculty_card_status(self, faculty_id, new_status):
+    def update_faculty_card_status(self, faculty_id, new_status_bool):
         """
         Update the status of a faculty card in real-time.
         
         Args:
             faculty_id (int): Faculty ID
-            new_status (bool): New status (True = Available, False = Unavailable)
+            new_status_bool (bool): New status (True = Available, False = Unavailable)
         """
         try:
             # Find the faculty card in the grid
@@ -1615,59 +1615,44 @@ class DashboardWindow(BaseWindow):
                 if not container_widget:
                     continue
                     
-                # Get the faculty card from the container (which is in a QHBoxLayout)
                 container_layout = container_widget.layout()
                 if not container_layout or container_layout.count() == 0:
                     continue
                     
                 faculty_card = container_layout.itemAt(0).widget()
-                if not faculty_card:
+                # Ensure it's a PooledFacultyCard and has the method
+                if not faculty_card or not hasattr(faculty_card, 'update_status') or not hasattr(faculty_card, 'faculty_data'):
                     continue
                 
-                # Check if this is the right faculty card
                 if faculty_card.faculty_data.get('id') == faculty_id:
-                    # Update the card status
-                    status_text = "Available" if new_status else "Unavailable"
+                    status_string = "available" if new_status_bool else "offline" # Or "unavailable"
                     
-                    # Update faculty data
-                    faculty_card.faculty_data['available'] = new_status
-                    faculty_card.faculty_data['status'] = status_text
+                    # Update card's internal state and display using its own method
+                    faculty_card.update_status(status_string)
                     
-                    # Update card appearance
-                    object_name = "faculty_card_available" if new_status else "faculty_card_unavailable"
-                    faculty_card.setObjectName(object_name)
-                    faculty_card.setStyleSheet("") # Force style refresh
-                    
-                    # Update status display in the card
-                    for j in range(faculty_card.layout().count()):
-                        layout_item = faculty_card.layout().itemAt(j)
-                        if isinstance(layout_item, QHBoxLayout):
-                            for k in range(layout_item.count()):
-                                item = layout_item.itemAt(k).widget()
-                                if isinstance(item, QLabel) and hasattr(item, 'text'):
-                                    if item.text() == "Available" or item.text() == "Unavailable":
-                                        # Found status label, update it
-                                        if new_status:
-                                            item.setText("Available")
-                                            item.setStyleSheet("font-size: 12pt; color: #27ae60; border: none; padding: 0; margin: 0; font-weight: 500;")
-                                        else:
-                                            item.setText("Unavailable")
-                                            item.setStyleSheet("font-size: 12pt; color: #e74c3c; border: none; padding: 0; margin: 0; font-weight: 500;")
-                    
-                    # Enable/disable request button based on availability
-                    for j in range(faculty_card.layout().count()):
-                        item = faculty_card.layout().itemAt(j).widget()
-                        if isinstance(item, QPushButton) and "Request Consultation" in item.text():
-                            item.setEnabled(new_status)
-                    
-                    logger.debug(f"Updated faculty card for ID {faculty_id} to status: {status_text}")
-                    return True
+                    # Update faculty_data dictionary stored in the card (if update_status doesn't do it)
+                    # PooledFacultyCard.update_status already updates self.faculty_data['status']
+                    # It also updates self.faculty_data['available'] effectively via the status string.
+                    faculty_card.faculty_data['available'] = new_status_bool
+
+
+                    # Update card's objectName for theming
+                    new_object_name = "faculty_card_available" if new_status_bool else "faculty_card_unavailable"
+                    if faculty_card.objectName() != new_object_name:
+                        faculty_card.setObjectName(new_object_name)
+                        # Force style refresh
+                        faculty_card.style().unpolish(faculty_card)
+                        faculty_card.style().polish(faculty_card)
+                        faculty_card.update()
+
+                    logger.debug(f"Updated faculty card for ID {faculty_id} to status: {status_string} via card method")
+                    return True # Found and updated
             
-            # If we get here, the faculty card wasn't found
-            # This is normal if the current view doesn't show this faculty
-            logger.debug(f"Faculty card for ID {faculty_id} not found in current view")
-            return False
+            logger.debug(f"Faculty card for ID {faculty_id} not found in current view for status update.")
+            return False # Card not found
             
         except Exception as e:
-            logger.error(f"Error updating faculty card status: {e}")
+            logger.error(f"Error updating faculty card status for ID {faculty_id}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
