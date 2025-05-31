@@ -45,7 +45,7 @@ bool buttonBLastState = HIGH;
 bool messageDisplayed = false;
 unsigned long messageDisplayStart = 0;
 String lastReceivedMessage = "";
-String messageId = "";
+String g_receivedConsultationId = "";
 
 // Global variables
 unsigned long lastHeartbeat = 0;
@@ -779,6 +779,12 @@ int getCenterX(String text, int textSize) {
 void handleAcknowledgeButton() {
   if (!messageDisplayed || currentMessage.isEmpty()) return;
 
+  if (g_receivedConsultationId.isEmpty()) {
+    DEBUG_PRINTLN("❌ Cannot send ACKNOWLEDGE: Missing Consultation ID (CID).");
+    showResponseConfirmation("NO CID!", COLOR_ERROR);
+    return;
+  }
+
   DEBUG_PRINTLN("📤 Sending ACKNOWLEDGE response to central terminal");
 
   // Create acknowledge response
@@ -786,8 +792,8 @@ void handleAcknowledgeButton() {
   response += "\"faculty_id\":" + String(FACULTY_ID) + ",";
   response += "\"faculty_name\":\"" + String(FACULTY_NAME) + "\",";
   response += "\"response_type\":\"ACKNOWLEDGE\",";
-  response += "\"message_id\":\"" + messageId + "\",";
-  response += "\"original_message\":\"" + currentMessage + "\",";
+  response += "\"message_id\":\"" + g_receivedConsultationId + "\",";
+  response += "\"original_message\":\"" + lastReceivedMessage + "\",";
   response += "\"timestamp\":\"" + String(millis()) + "\",";
   response += "\"status\":\"Professor acknowledges the request and will respond accordingly\"";
   response += "}";
@@ -814,6 +820,12 @@ void handleAcknowledgeButton() {
 void handleBusyButton() {
   if (!messageDisplayed || currentMessage.isEmpty()) return;
 
+  if (g_receivedConsultationId.isEmpty()) {
+    DEBUG_PRINTLN("❌ Cannot send BUSY: Missing Consultation ID (CID).");
+    showResponseConfirmation("NO CID!", COLOR_ERROR);
+    return;
+  }
+
   DEBUG_PRINTLN("📤 Sending BUSY response to central terminal");
 
   // Create busy response
@@ -821,8 +833,8 @@ void handleBusyButton() {
   response += "\"faculty_id\":" + String(FACULTY_ID) + ",";
   response += "\"faculty_name\":\"" + String(FACULTY_NAME) + "\",";
   response += "\"response_type\":\"BUSY\",";
-  response += "\"message_id\":\"" + messageId + "\",";
-  response += "\"original_message\":\"" + currentMessage + "\",";
+  response += "\"message_id\":\"" + g_receivedConsultationId + "\",";
+  response += "\"original_message\":\"" + lastReceivedMessage + "\",";
   response += "\"timestamp\":\"" + String(millis()) + "\",";
   response += "\"status\":\"Professor is currently busy and cannot cater to this request\"";
   response += "}";
@@ -871,7 +883,7 @@ void clearCurrentMessage() {
   currentMessage = "";
   messageDisplayed = false;
   messageDisplayStart = 0;
-  messageId = "";
+  g_receivedConsultationId = "";
   updateMainDisplay(); // Return to normal display
 }
 
@@ -1119,20 +1131,45 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     length = MAX_MESSAGE_LENGTH;
   }
 
-  String message = "";
-  message.reserve(length + 1);  // Pre-allocate memory
+  String messageContent = "";
+  messageContent.reserve(length + 1);  // Pre-allocate memory
 
   for (unsigned int i = 0; i < length; i++) {
-    message += (char)payload[i];
+    messageContent += (char)payload[i];
   }
 
-  DEBUG_PRINTF("📨 Message received (%d bytes): %s\n", length, message.c_str());
+  DEBUG_PRINTF("📨 Message received (%d bytes): %s\n", length, messageContent.c_str());
 
+  // Parse Consultation ID (CID) from the message
+  // Expected format: "CID:{consultation_id} From:{student_name} (SID:{student_id}): {message}"
+  int cidStartIndex = messageContent.indexOf("CID:");
+  int cidEndIndex = -1;
+  String parsedConsultationId = "";
+
+  if (cidStartIndex != -1) {
+    cidStartIndex += 4; // Length of "CID:"
+    cidEndIndex = messageContent.indexOf(" ", cidStartIndex); // Assume CID ends before the next space
+    if (cidEndIndex != -1) {
+      parsedConsultationId = messageContent.substring(cidStartIndex, cidEndIndex);
+    } else {
+      // If no space, maybe it's at the end of a short message part (less likely for full message)
+      // Or handle if the format guarantees CID is followed by a specific delimiter or is the first part.
+      // For now, this basic parsing assumes a space after CID.
+      // A more robust parser might be needed if message format varies greatly.
+      parsedConsultationId = messageContent.substring(cidStartIndex); // Fallback: take rest of string (less safe)
+    }
+    g_receivedConsultationId = parsedConsultationId;
+    DEBUG_PRINTF("🔑 Parsed Consultation ID (CID): %s\n", g_receivedConsultationId.c_str());
+  } else {
+    g_receivedConsultationId = ""; // Clear if not found, or handle error
+    DEBUG_PRINTLN("⚠️ Consultation ID (CID:) not found in message.");
+    // If CID is mandatory for further processing, might want to ignore message or send error.
+    // For now, we'll proceed, but responses might fail to link in central system if CID is missing.
+  }
+  
   if (presenceDetector.getPresence()) {
-    // Generate message ID for tracking
-    messageId = String(millis()) + "_" + String(random(1000, 9999));
-    lastReceivedMessage = message;
-    displayIncomingMessage(message);
+    lastReceivedMessage = messageContent; // Store the full message for display
+    displayIncomingMessage(messageContent); // Display the full message
   } else {
     DEBUG_PRINTLN("📭 Message ignored - Professor is AWAY");
   }
@@ -1456,7 +1493,7 @@ void displayIncomingMessage(String message) {
   tft.setCursor(170, MAIN_AREA_Y + 115);
   tft.print("BUSY");
 
-  DEBUG_PRINTF("📱 Message displayed with buttons. Message ID: %s\n", messageId.c_str());
+  DEBUG_PRINTF("📱 Message displayed with buttons. Message ID: %s\n", g_receivedConsultationId.c_str());
 }
 
 // ================================

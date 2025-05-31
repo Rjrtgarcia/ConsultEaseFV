@@ -154,9 +154,9 @@ def publish_consultation_request(consultation_data: dict) -> bool:
     # 3. Faculty messages topic (plain text for desk unit)
     student_name = consultation_data.get('student_name', 'Unknown')
     student_id = consultation_data.get('student_id', 'Unknown')
-    message = consultation_data.get('message', 'No message')
+    message = consultation_data.get('request_message', 'No actual message provided')
 
-    plain_message = f"Consultation request from {student_name} ({student_id}): {message}"
+    plain_message = f"CID:{consultation_id} From:{student_name} (SID:{student_id}): {message}"
     faculty_messages_topic = f"consultease/faculty/{faculty_id}/messages"
     if publish_mqtt_message(faculty_messages_topic, plain_message, qos=2):
         success_count += 1

@@ -182,58 +182,86 @@ class FacultyResponseController:
         Process faculty response and update consultation status.
 
         Args:
-            response_data (dict): Faculty response data
+            response_data (dict): Faculty response data. Expected to contain:
+                                  'faculty_id': ID of the faculty responding (from payload)
+                                  'message_id': consultation_id being responded to
+                                  'response_type': e.g., "ACKNOWLEDGE", "REJECTED", "COMPLETED"
 
         Returns:
             bool: True if processed successfully
         """
         try:
-            faculty_id = response_data.get('faculty_id')
+            faculty_id_from_payload = response_data.get('faculty_id')
             response_type = response_data.get('response_type')
-            message_id = response_data.get('message_id')
-            original_message = response_data.get('original_message', '')
+            consultation_id_from_response = response_data.get('message_id')
 
-            # Find the most recent pending consultation for this faculty
+            if not consultation_id_from_response:
+                logger.error("Faculty response missing 'message_id' (consultation_id).")
+                return False
+            
+            if not faculty_id_from_payload: # Also ensure faculty_id is in payload
+                logger.error("Faculty response missing 'faculty_id' in payload.")
+                return False
+
             db = get_db()
             try:
-                consultation = db.query(Consultation).filter(
-                    Consultation.faculty_id == faculty_id,
-                    Consultation.status == ConsultationStatus.PENDING
-                ).order_by(Consultation.requested_at.desc()).first()
+                consultation = db.query(Consultation).filter(Consultation.id == consultation_id_from_response).first()
 
                 if not consultation:
-                    logger.warning(f"No pending consultation found for faculty {faculty_id}")
+                    logger.warning(f"Consultation ID {consultation_id_from_response} (from response) not found in database.")
                     return False
 
-                # Update consultation status based on response type
-                if response_type == 'ACKNOWLEDGE':
-                    consultation.status = ConsultationStatus.ACCEPTED
-                    consultation.accepted_at = datetime.now()
-                    logger.info(f"Consultation {consultation.id} acknowledged by faculty {faculty_id}")
+                # Verification
+                if str(consultation.faculty_id) != str(faculty_id_from_payload):
+                    logger.warning(f"Faculty ID mismatch for consultation {consultation.id}. "
+                                   f"Response payload for faculty {faculty_id_from_payload}, "
+                                   f"but consultation belongs to faculty {consultation.faculty_id}. Ignoring response.")
+                    return False
 
-                elif response_type == 'BUSY':
-                    consultation.status = ConsultationStatus.DECLINED
-                    consultation.completed_at = datetime.now()
-                    logger.info(f"Consultation {consultation.id} declined (busy) by faculty {faculty_id}")
+                if consultation.status != ConsultationStatus.PENDING:
+                    logger.warning(f"Consultation {consultation.id} is no longer PENDING (current status: {consultation.status.value}). "
+                                   f"Response '{response_type}' may be late or redundant. Ignoring response.")
+                    return False
 
+                logger.info(f"Processing response '{response_type}' for PENDING consultation {consultation.id} (Faculty: {consultation.faculty_id})")
+
+                new_status_enum: Optional[ConsultationStatus] = None
+                if response_type == "ACKNOWLEDGE" or response_type == "ACCEPTED":
+                    new_status_enum = ConsultationStatus.ACCEPTED
+                elif response_type == "REJECTED" or response_type == "DECLINED": # Allow "DECLINED"
+                    new_status_enum = ConsultationStatus.REJECTED
+                elif response_type == "COMPLETED":
+                    new_status_enum = ConsultationStatus.COMPLETED
+                # Add other states like STARTED, BUSY if your faculty unit supports them
+                # Example:
+                # elif response_type == "BUSY":
+                # new_status_enum = ConsultationStatus.BUSY # Assuming you add this to Enum
+
+                if new_status_enum:
+                    # Import ConsultationController locally or ensure it's available via __init__
+                    from .consultation_controller import ConsultationController as SystemConsultationController
+                    cc = SystemConsultationController()
+                    updated_consultation = cc.update_consultation_status(consultation.id, new_status_enum)
+                    
+                    if updated_consultation:
+                        logger.info(f"Successfully updated consultation {consultation.id} to status {new_status_enum.value} via ConsultationController.")
+                        # Add consultation_id and student_id to response_data for callbacks, if not already there
+                        response_data['consultation_id'] = consultation.id 
+                        response_data['student_id'] = consultation.student_id
+                        return True
+                    else:
+                        logger.error(f"Failed to update consultation {consultation.id} to {new_status_enum.value} using ConsultationController.")
+                        return False
                 else:
-                    logger.warning(f"Unknown response type: {response_type}")
+                    logger.warning(f"Unknown or unhandled response_type: '{response_type}' for consultation {consultation.id}. Status not changed.")
                     return False
-
-                db.commit()
-
-                # Add response metadata to the response data for callbacks
-                response_data['consultation_id'] = consultation.id
-                response_data['student_id'] = consultation.student_id
-                response_data['processed_at'] = datetime.now().isoformat()
-
-                return True
-
             finally:
                 db.close()
 
         except Exception as e:
-            logger.error(f"Error processing faculty response: {str(e)}")
+            logger.error(f"Critical error in _process_faculty_response: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
 
     def get_response_statistics(self) -> Dict[str, Any]:
