@@ -5,6 +5,7 @@ from ..utils.mqtt_utils import publish_consultation_request, publish_mqtt_messag
 from ..utils.mqtt_topics import MQTTTopics
 from ..utils.cache_manager import invalidate_consultation_cache
 from ..services.consultation_queue_service import get_consultation_queue_service, MessagePriority
+from sqlalchemy.orm import joinedload
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -260,7 +261,10 @@ class ConsultationController:
         """
         try:
             db = get_db()
-            query = db.query(Consultation)
+            query = db.query(Consultation).options(
+                joinedload(Consultation.faculty),
+                joinedload(Consultation.student)
+            )
 
             # Apply filters
             if student_id is not None:
