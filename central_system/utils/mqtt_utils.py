@@ -4,6 +4,8 @@ Provides convenient access to the async MQTT service.
 """
 
 import logging
+import json
+import inspect
 from typing import Any, Optional
 from ..services.async_mqtt_service import get_async_mqtt_service
 
@@ -20,27 +22,84 @@ def get_mqtt_service():
     return get_async_mqtt_service()
 
 
-def publish_mqtt_message(topic: str, data: Any, qos: int = 1, retain: bool = False) -> bool:
+def publish_mqtt_message(topic: str, payload: any, qos: int = 0, retain: bool = False) -> bool:
     """
-    Convenience function for publishing MQTT messages asynchronously.
+    Publish a message to an MQTT topic using the async MQTT service.
+    Includes detailed diagnostic logging of publish attempts.
 
     Args:
         topic: MQTT topic to publish to
-        data: Data to publish (will be JSON encoded if not string)
+        payload: Data to publish (will be JSON encoded if not string)
         qos: Quality of service level (0, 1, or 2)
         retain: Whether to retain the message on the broker
 
     Returns:
         bool: True if message was queued successfully, False otherwise
     """
+    from .mqtt_topics import MQTTTopics
+    client = get_async_mqtt_service().client
+    publish_successful = False
+
+    if client and client.is_connected():
+        try:
+            if isinstance(payload, dict) or isinstance(payload, list):
+                message_str = json.dumps(payload)
+            else:
+                message_str = str(payload)
+            
+            result = client.publish(topic, message_str, qos=qos, retain=retain)
+            
+            if result.rc == 0:
+                publish_successful = True
+            else:
+                logger.error(f"Failed to publish to {topic} - MQTT Error Code: {result.rc}")
+                publish_successful = False
+
+        except Exception as e:
+            logger.error(f"Exception during MQTT publish to {topic}: {str(e)}")
+            publish_successful = False
+    else:
+        logger.warning(f"MQTT client not available or not connected. Cannot publish to {topic}")
+        publish_successful = False
+
+    # ===== DETAILED DIAGNOSTIC LOGGING =====
     try:
-        service = get_mqtt_service()
-        service.publish_async(topic, data, qos, retain)
-        logger.debug(f"Queued MQTT message for topic: {topic}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to queue MQTT message for topic {topic}: {e}")
-        return False
+        current_stack = inspect.stack()
+        actual_caller_index = 1
+        if len(current_stack) > actual_caller_index:
+            caller_frame_info = current_stack[actual_caller_index]
+            caller_function_name = caller_frame_info.function
+            caller_filename = caller_frame_info.filename 
+            caller_lineno = caller_frame_info.lineno
+        else:
+            caller_function_name = "UnknownFunction"
+            caller_filename = "UnknownFile"
+            caller_lineno = 0
+            
+        log_payload_str = ""
+        if isinstance(payload, dict) or isinstance(payload, list):
+            try:
+                log_payload_str = json.dumps(payload) 
+            except TypeError:
+                log_payload_str = str(payload) 
+        else:
+            log_payload_str = str(payload)
+
+        logger.info(
+            f"MQTT_PUBLISH_TRACE: "
+            f"Success='{publish_successful}', "
+            f"Topic='{topic}', "
+            f"Payload='{log_payload_str}', "
+            f"QoS='{qos}', Retain='{retain}', "
+            f"Called_By_File='{caller_filename}', "
+            f"Called_By_Function='{caller_function_name}', "
+            f"Called_By_Line='{caller_lineno}'"
+        )
+    except Exception as e_log:
+        logger.error(f"Error during MQTT_PUBLISH_TRACE detailed logging: {e_log}")
+    # ===== END OF DIAGNOSTIC LOGGING =====
+
+    return publish_successful
 
 
 def subscribe_to_topic(topic: str, callback: callable) -> bool:
