@@ -544,7 +544,19 @@ class ConsultationHistoryPanel(QFrame):
         self.consultation_table = QTableWidget()
         self.consultation_table.setColumnCount(5)
         self.consultation_table.setHorizontalHeaderLabels(["Faculty", "Course", "Status", "Date", "Actions"])
-        self.consultation_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # self.consultation_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch) # Old: Stretch all
+
+        # New: Set specific resize modes
+        header = self.consultation_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Faculty
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Course
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Status
+        header.setSectionResizeMode(3, QHeaderView.Stretch)  # Date
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Actions
+        # Optionally, set a minimum width for the Actions column if ResizeToContents is still too small due to button styles
+        # header.setMinimumSectionSize(120) # Example: Minimum width for any column
+        # self.consultation_table.setColumnWidth(4, 150) # Alternative: fixed width for Actions
+
         self.consultation_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.consultation_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.consultation_table.setSelectionMode(QTableWidget.SingleSelection)
