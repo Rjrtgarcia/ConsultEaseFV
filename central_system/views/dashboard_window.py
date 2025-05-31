@@ -1155,32 +1155,64 @@ class DashboardWindow(BaseWindow):
 
         return old_hash == new_hash
 
-    def show_consultation_form(self, faculty):
+    def show_consultation_form(self, faculty_or_id):
         """
         Show the consultation request form for a specific faculty.
 
         Args:
-            faculty (object): Faculty object to request consultation with
+            faculty_or_id (object or int): Faculty object or Faculty ID
         """
-        # Check if faculty is available
-        if not faculty.status:
+        logger.debug(f"show_consultation_form called with: {faculty_or_id} (type: {type(faculty_or_id)})")
+        faculty_object = None
+
+        if isinstance(faculty_or_id, int):
+            logger.info(f"show_consultation_form received faculty ID: {faculty_or_id}. Fetching object.")
+            try:
+                from ..controllers import FacultyController # Local import to avoid circular dependency issues at module load
+                fc = FacultyController()
+                faculty_object = fc.get_faculty_by_id(faculty_or_id)
+                if not faculty_object:
+                    logger.warning(f"Faculty with ID {faculty_or_id} not found by controller.")
+                    self.show_notification(
+                        f"Faculty with ID {faculty_or_id} not found.",
+                        "error"
+                    )
+                    return
+            except Exception as e:
+                logger.error(f"Error fetching faculty by ID {faculty_or_id} in show_consultation_form: {str(e)}")
+                self.show_notification(
+                    f"Error retrieving details for faculty ID {faculty_or_id}.",
+                    "error"
+                )
+                return
+        elif hasattr(faculty_or_id, 'status') and hasattr(faculty_or_id, 'name') and hasattr(faculty_or_id, 'id'): # Basic check for Faculty-like object
+            logger.debug("show_consultation_form received a faculty-like object.")
+            faculty_object = faculty_or_id
+        else:
+            logger.error(f"show_consultation_form called with invalid/unexpected type: {type(faculty_or_id)}, value: {faculty_or_id}")
+            self.show_notification("An unexpected error occurred while trying to show the consultation form. Invalid faculty data.", "error")
+            return
+
+        # Now use faculty_object for the rest of the method
+        if not faculty_object.status:
             self.show_notification(
-                f"Faculty {faculty.name} is currently unavailable for consultation.",
+                f"Faculty {faculty_object.name} (ID: {faculty_object.id}) is currently unavailable for consultation.",
                 "error"
             )
             return
 
         # Also populate the dropdown with all available faculty
         try:
-            from ..controllers import FacultyController
+            from ..controllers import FacultyController # Local import
             faculty_controller = FacultyController()
             available_faculty = faculty_controller.get_all_faculty(filter_available=True)
 
             # Set the faculty and faculty options in the consultation panel
-            self.consultation_panel.set_faculty(faculty)
+            self.consultation_panel.set_faculty(faculty_object) # Use the validated/fetched object
             self.consultation_panel.set_faculty_options(available_faculty)
         except Exception as e:
             logger.error(f"Error loading available faculty for consultation form: {str(e)}")
+            self.show_notification("Error preparing consultation form.", "error")
 
     def handle_consultation_request(self, faculty, message, course_code):
         """
