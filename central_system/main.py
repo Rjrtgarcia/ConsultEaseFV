@@ -952,29 +952,53 @@ class ConsultEaseApp:
         """
         Handle faculty data updated event with enhanced cross-dashboard synchronization.
         """
-        logger.info("Faculty data updated - refreshing all active dashboards")
+        logger.info("Faculty data updated - refreshing relevant active dashboards")
 
         # Refresh student dashboard if active
         if self.dashboard_window and self.dashboard_window.isVisible():
             try:
-                faculties = self.faculty_controller.get_all_faculty()
-                logger.info(f"Refreshing student dashboard with {len(faculties)} faculty members")
-                self.dashboard_window.populate_faculty_grid(faculties)
+                # Use a fresh session to get faculty to avoid DetachedInstanceError
+                db_session = get_db(force_new=True)
+                try:
+                    faculties_query = db_session.query(Faculty)
+                    faculties = faculties_query.all()
+                    # Ensure data is loaded before closing session
+                    safe_faculties = []
+                    for f in faculties:
+                        safe_faculties.append({
+                            'id': f.id, 'name': f.name, 'department': f.department, 
+                            'status': f.status, 'ble_id': f.ble_id, 'always_available': f.always_available,
+                            'email': f.email, 'room': f.room, 'image_path': f.image_path, 
+                            'last_seen': f.last_seen.isoformat() if f.last_seen else None
+                        })
+                finally:
+                    db_session.close()
+                
+                logger.info(f"Refreshing student dashboard with {len(safe_faculties)} faculty members")
+                # Use populate_faculty_grid_safe as it expects dictionaries
+                self.dashboard_window.populate_faculty_grid_safe(safe_faculties)
 
                 # Also update the consultation panel's faculty options
                 if hasattr(self.dashboard_window, 'consultation_panel'):
-                    self.dashboard_window.consultation_panel.set_faculty_options(faculties)
+                    # populate_faculty_grid_safe takes dicts, but set_faculty_options might expect objects
+                    # Re-fetch as objects for consultation_panel if necessary, or adapt set_faculty_options
+                    # For now, assuming set_faculty_options can handle dicts or is robust
+                    self.dashboard_window.consultation_panel.set_faculty_options(safe_faculties)
 
             except Exception as e:
                 logger.error(f"Error refreshing student dashboard: {e}")
+                import traceback
+                logger.error(f"Student dashboard refresh traceback: {traceback.format_exc()}")
 
-        # Refresh admin dashboard if it's open
-        if hasattr(self, 'admin_dashboard_window') and self.admin_dashboard_window and self.admin_dashboard_window.isVisible():
-            try:
-                logger.info("Refreshing admin dashboard faculty table")
-                self.admin_dashboard_window.handle_faculty_updated()
-            except Exception as e:
-                logger.error(f"Error refreshing admin dashboard: {e}")
+        # The admin dashboard already handles its own refresh internally when its
+        # FacultyManagementTab signals an update, which then calls AdminDashboardWindow.handle_faculty_updated.
+        # Calling it again from here would cause recursion.
+        # if hasattr(self, 'admin_dashboard_window') and self.admin_dashboard_window and self.admin_dashboard_window.isVisible():
+        #     try:
+        #         logger.info("Ensuring admin dashboard faculty table is up-to-date (already handled internally)")
+        #         # self.admin_dashboard_window.handle_faculty_updated() # This line caused recursion
+        #     except Exception as e:
+        #         logger.error(f"Error during admin dashboard refresh check: {e}")
 
         # Trigger immediate refresh of faculty status for real-time updates
         if hasattr(self, 'faculty_controller'):
