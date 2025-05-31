@@ -215,6 +215,7 @@ class DashboardWindow(BaseWindow):
     """
     # Signal to handle consultation request
     consultation_requested = pyqtSignal(object, str, str)
+    request_ui_refresh = pyqtSignal()
 
     def __init__(self, student=None, parent=None):
         self.student = student
@@ -233,6 +234,9 @@ class DashboardWindow(BaseWindow):
         # UI performance utilities
         self.ui_batcher = get_ui_batcher()
         self.widget_state_manager = get_widget_state_manager()
+
+        # Connect the UI refresh signal
+        self.request_ui_refresh.connect(self.refresh_faculty_status)
 
         # Faculty card manager for pooling
         self.faculty_card_manager = get_faculty_card_manager()
@@ -1626,7 +1630,7 @@ class DashboardWindow(BaseWindow):
             logger.debug(f"Realtime update for faculty {faculty_id} processed, card_updated: {card_updated}. Triggering full UI refresh.")
             # Use QTimer.singleShot to schedule the refresh in the next event loop iteration.
             # This can help coalesce multiple rapid updates and avoid immediate heavy refresh on every single MQTT message.
-            QTimer.singleShot(100, self.refresh_faculty_status) # 100ms delay
+            self.request_ui_refresh.emit()
             
         except Exception as e:
             logger.error(f"Error handling real-time status update: {e}")
@@ -1651,7 +1655,7 @@ class DashboardWindow(BaseWindow):
                     card_updated = self.update_faculty_card_status(faculty_id, new_status)
                     logger.debug(f"System notification for faculty {faculty_id} status processed, card_updated: {card_updated}. Triggering full UI refresh.")
                     # Schedule a full refresh to ensure data consistency
-                    QTimer.singleShot(100, self.refresh_faculty_status) # ADDED REFRESH CALL
+                    self.request_ui_refresh.emit()
         except Exception as e:
             logger.error(f"Error handling system notification: {e}")
 

@@ -405,8 +405,8 @@ class FacultyController:
 
             for topic in topics:
                 try:
-                    publish_mqtt_message(topic, notification)
-                    logger.debug(f"Published status update to {topic} with sequence {self._message_sequence}")
+                    publish_mqtt_message(topic, notification, retain=True)
+                    logger.debug(f"Published status update to {topic} with sequence {self._message_sequence} (retained)")
                 except Exception as e:
                     logger.error(f"Error publishing to {topic}: {str(e)}")
 
