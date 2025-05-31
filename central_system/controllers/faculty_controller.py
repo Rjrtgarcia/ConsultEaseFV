@@ -220,6 +220,7 @@ class FacultyController:
         Returns:
             dict: Dictionary containing updated faculty data, or None if not found or error.
         """
+        logger.info(f"Attempting to update faculty ID {faculty_id} to status: {status}")
         import threading
 
         # Use a lock to prevent concurrent status updates for the same faculty
@@ -237,16 +238,18 @@ class FacultyController:
                 db_manager = get_database_manager()
 
                 with db_manager.get_session_context() as db:
+                    logger.debug(f"DB session acquired for faculty {faculty_id}")
                     # Use SELECT FOR UPDATE to lock the row and prevent concurrent modifications
                     faculty = db.query(Faculty).filter(Faculty.id == faculty_id).with_for_update().first()
 
                     if not faculty:
-                        logger.error(f"Faculty not found: {faculty_id}")
+                        logger.error(f"Faculty not found in DB: {faculty_id}. Cannot update status.")
                         return None
 
+                    logger.debug(f"Faculty {faculty.name} (ID: {faculty_id}) current DB status: {faculty.status}. Received new status: {status}")
                     # Check if status actually changed to avoid unnecessary updates
                     if faculty.status == status:
-                        logger.debug(f"Faculty {faculty.name} (ID: {faculty.id}) status unchanged: {status}")
+                        logger.info(f"Faculty {faculty.name} (ID: {faculty.id}) status unchanged ({status}). No DB update needed.")
                         # Return dictionary representation even if unchanged
                         return {
                             'id': faculty.id,
@@ -260,6 +263,7 @@ class FacultyController:
 
                     # Store previous status for logging
                     previous_status = faculty.status
+                    logger.debug(f"Faculty {faculty.name} (ID: {faculty.id}) previous status: {previous_status}, new status: {status}. Proceeding with update.")
 
                     # Update status and timestamp atomically
                     faculty.status = status
@@ -271,7 +275,7 @@ class FacultyController:
                     else:
                         faculty.version += 1
 
-                    logger.info(f"Atomically updated status for faculty {faculty.name} (ID: {faculty.id}): {previous_status} -> {status}")
+                    logger.info(f"Atomically updated attributes for faculty {faculty.name} (ID: {faculty.id}): {previous_status} -> {status}. Awaiting commit.")
 
                     # Create a safe faculty data dictionary to avoid DetachedInstanceError
                     faculty_data = {
@@ -284,7 +288,11 @@ class FacultyController:
                         'version': getattr(faculty, 'version', 1)
                     }
 
+                # Session context manager will attempt to commit here if no exceptions occurred
+                logger.info(f"DB session context exited for faculty {faculty_id}. Commit should have occurred if changes were made.")
+
                 # Invalidate faculty cache when status changes (outside transaction)
+                logger.debug(f"Invalidating cache for faculty {faculty_id} post-update.")
                 invalidate_faculty_cache()
                 invalidate_cache_pattern("get_all_faculty")
 
@@ -294,7 +302,7 @@ class FacultyController:
                 return faculty_data
 
             except Exception as e:
-                logger.error(f"Error updating faculty status atomically: {str(e)}")
+                logger.error(f"Exception during update_faculty_status for ID {faculty_id} (status: {status}): {str(e)}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 return None
