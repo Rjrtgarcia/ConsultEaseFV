@@ -1395,3 +1395,157 @@ class ConsultationPanel(QTabWidget):
         Refresh the consultation history.
         """
         self.history_panel.refresh_consultations()
+
+    def _create_consultation_card(self, consultation_data):
+        """
+        Create a card widget for a consultation.
+
+        Args:
+            consultation_data (dict): Consultation data
+
+        Returns:
+            QWidget: Consultation card widget
+        """
+        card = QFrame()
+        card.setObjectName("consultation_card")
+        card.setMinimumHeight(150)
+        card.setFrameShape(QFrame.StyledPanel)
+
+        # Determine background color based on status
+        status = consultation_data.get('status', 'pending')
+        if status == 'accepted':
+            card.setStyleSheet("""
+                QFrame#consultation_card {
+                    background-color: #dff0d8;
+                    border: 1px solid #d6e9c6;
+                    border-radius: 5px;
+                    margin: 5px;
+                }
+            """)
+        elif status == 'declined':
+            card.setStyleSheet("""
+                QFrame#consultation_card {
+                    background-color: #f2dede;
+                    border: 1px solid #ebccd1;
+                    border-radius: 5px;
+                    margin: 5px;
+                }
+            """)
+        elif status == 'cancelled':
+            card.setStyleSheet("""
+                QFrame#consultation_card {
+                    background-color: #f5f5f5;
+                    border: 1px solid #ddd;
+                    border-radius: 5px;
+                    margin: 5px;
+                    color: #777;
+                }
+            """)
+        elif status == 'timeout':
+            card.setStyleSheet("""
+                QFrame#consultation_card {
+                    background-color: #fcf8e3;
+                    border: 1px solid #faebcc;
+                    border-radius: 5px;
+                    margin: 5px;
+                }
+            """)
+        else:  # pending
+            card.setStyleSheet("""
+                QFrame#consultation_card {
+                    background-color: #d9edf7;
+                    border: 1px solid #bce8f1;
+                    border-radius: 5px;
+                    margin: 5px;
+                }
+            """)
+
+        card_layout = QVBoxLayout(card)
+
+        # Header with faculty name and timestamp
+        header_layout = QHBoxLayout()
+        faculty_name = consultation_data.get('faculty_name', 'Unknown Faculty')
+        faculty_label = QLabel(f"<b>{faculty_name}</b>")
+        header_layout.addWidget(faculty_label)
+
+        # Status indicator
+        status_label = QLabel()
+        status_text = status.capitalize()
+        
+        if status == 'accepted':
+            status_label.setText(f"<font color='green'>{status_text}</font>")
+            if 'accepted_at' in consultation_data and consultation_data['accepted_at']:
+                accepted_time = self._format_datetime(consultation_data['accepted_at'])
+                status_label.setText(f"<font color='green'>{status_text} at {accepted_time}</font>")
+        elif status == 'declined':
+            status_label.setText(f"<font color='red'>{status_text}</font>")
+            if 'declined_at' in consultation_data and consultation_data['declined_at']:
+                declined_time = self._format_datetime(consultation_data['declined_at'])
+                status_label.setText(f"<font color='red'>{status_text} at {declined_time}</font>")
+        elif status == 'cancelled':
+            status_label.setText(f"<font color='gray'>{status_text}</font>")
+        elif status == 'timeout':
+            status_label.setText(f"<font color='orange'>No Response</font>")
+        else:  # pending
+            status_label.setText(f"<font color='blue'>{status_text}</font>")
+            
+        header_layout.addWidget(status_label)
+        header_layout.addStretch()
+
+        timestamp = consultation_data.get('requested_at', '')
+        if timestamp:
+            formatted_time = self._format_datetime(timestamp)
+            time_label = QLabel(formatted_time)
+            time_label.setStyleSheet("color: #777;")
+            header_layout.addWidget(time_label)
+
+        card_layout.addLayout(header_layout)
+
+        # Course code if available
+        course_code = consultation_data.get('course_code', '')
+        if course_code:
+            course_layout = QHBoxLayout()
+            course_label = QLabel(f"Course: {course_code}")
+            course_label.setStyleSheet("color: #31708f;")
+            course_layout.addWidget(course_label)
+            course_layout.addStretch()
+            card_layout.addLayout(course_layout)
+
+        # Request message
+        message = consultation_data.get('request_message', '')
+        message_label = QLabel(message)
+        message_label.setWordWrap(True)
+        message_label.setStyleSheet("padding: 5px;")
+        card_layout.addWidget(message_label)
+
+        # Faculty response message if available
+        response_message = consultation_data.get('response_message', '')
+        if response_message:
+            response_layout = QHBoxLayout()
+            response_label = QLabel(f"<i>Faculty response: {response_message}</i>")
+            response_label.setWordWrap(True)
+            response_label.setStyleSheet("padding: 5px; color: #555;")
+            card_layout.addWidget(response_label)
+
+        # Buttons for pending consultations
+        if status == 'pending':
+            button_layout = QHBoxLayout()
+            cancel_button = QPushButton("Cancel Request")
+            cancel_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #f44336;
+                    color: white;
+                    border-radius: 3px;
+                    padding: 5px;
+                    min-width: 100px;
+                }
+                QPushButton:hover {
+                    background-color: #d32f2f;
+                }
+            """)
+            cancel_button.clicked.connect(lambda: self._cancel_consultation(consultation_data.get('id')))
+            button_layout.addStretch()
+            button_layout.addWidget(cancel_button)
+            card_layout.addLayout(button_layout)
+
+        return card

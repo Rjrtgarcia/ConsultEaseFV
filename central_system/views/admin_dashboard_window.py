@@ -33,6 +33,17 @@ class AdminDashboardWindow(BaseWindow):
         super().__init__(parent)
         self.init_ui()
 
+        # Set up RFID service
+        try:
+            from ..services import get_rfid_service
+            self.rfid_service = get_rfid_service()
+            self.simulation_mode = os.environ.get('RFID_SIMULATION_MODE', 'false').lower() == 'true'
+            self.logger.info(f"RFID service initialized: {self.rfid_service}")
+        except Exception as e:
+            self.logger.error(f"Error initializing RFID service: {e}")
+            self.rfid_service = None
+            self.simulation_mode = False
+
     def init_ui(self):
         """
         Initialize the UI components.
@@ -62,20 +73,23 @@ class AdminDashboardWindow(BaseWindow):
         admin_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
         header_layout.addWidget(admin_label)
 
-        # Logout button - smaller size
+        # Logout button
         logout_button = QPushButton("Logout")
-        logout_button.setFixedSize(80, 30)
+        logout_button.setFixedSize(100, 40)  # Increased from 80x30 to 100x40 for better touch target
         logout_button.setStyleSheet("""
             QPushButton {
                 background-color: #e74c3c;
                 color: white;
-                border-radius: 4px;
-                font-size: 10pt;
+                border-radius: 5px;
                 font-weight: bold;
-                padding: 2px 8px;
+                font-size: 14px;
+                padding: 5px;
             }
             QPushButton:hover {
                 background-color: #c0392b;
+            }
+            QPushButton:pressed {
+                background-color: #a93226;
             }
         """)
         logout_button.clicked.connect(self.logout)
@@ -2504,7 +2518,7 @@ class StudentDialog(QDialog):
         self.init_ui()
 
         # If we're in simulation mode, enable the simulate button
-        self.simulation_mode = os.environ.get('RFID_SIMULATION_MODE', 'true').lower() == 'true'
+        self.simulation_mode = os.environ.get('RFID_SIMULATION_MODE', 'false').lower() == 'true'
 
     def init_ui(self):
         """
@@ -2674,12 +2688,6 @@ class RFIDScanDialog(QDialog):
         self.scanning_timer.timeout.connect(self.update_animation)
         self.scanning_timer.start(500)  # Update every 500ms
 
-        # For development, add a simulate button
-        if os.environ.get('RFID_SIMULATION_MODE', 'true').lower() == 'true':
-            self.simulate_button = QPushButton("Simulate Scan")
-            self.simulate_button.clicked.connect(self.simulate_scan)
-            self.layout().addWidget(self.simulate_button, alignment=Qt.AlignCenter)
-
     def init_ui(self):
         """
         Initialize the UI components.
@@ -2830,35 +2838,6 @@ class RFIDScanDialog(QDialog):
             except Exception as e:
                 logger.error(f"Error unregistering RFID callback in accept: {str(e)}")
         super().accept()
-
-    def simulate_scan(self):
-        """
-        Simulate a successful RFID scan.
-        """
-        try:
-            # Disable the simulate button to prevent multiple clicks
-            if hasattr(self, 'simulate_button'):
-                self.simulate_button.setEnabled(False)
-
-            # Only simulate if no real scan has occurred yet
-            if not self.scan_received:
-                logger.info("Simulating RFID scan from RFIDScanDialog")
-
-                # Generate a random RFID number
-                import random
-                random_uid = ''.join(random.choices('0123456789ABCDEF', k=8))
-                logger.info(f"Generated random RFID: {random_uid}")
-
-                # Call the service's simulate method
-                self.rfid_service.simulate_card_read(random_uid)
-
-                logger.info(f"Simulation complete, RFID: {random_uid}")
-        except Exception as e:
-            logger.error(f"Error in RFID simulation: {str(e)}")
-            self.status_label.setText(f"Simulation error: {str(e)}")
-            # Re-enable the button if there was an error
-            if hasattr(self, 'simulate_button'):
-                self.simulate_button.setEnabled(True)
 
     def get_rfid_uid(self):
         """

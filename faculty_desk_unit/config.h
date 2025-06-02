@@ -82,6 +82,26 @@
 #define BUTTON_DEBOUNCE_DELAY 50      // Debounce delay in milliseconds
 #define BUTTON_LONG_PRESS_TIME 1000   // Long press detection time
 
+// ============================================================================
+// BUTTON CONFIGURATION - For consultation responses
+// ============================================================================
+
+// Button Pins (Update these based on your actual hardware connections)
+#define BUTTON_ACCEPT_PIN 12  // Accept consultation button pin
+#define BUTTON_DECLINE_PIN 14  // Decline consultation button pin
+#define BUTTON_DEBOUNCE_DELAY 50  // Debounce delay in milliseconds
+
+// Consultation Response Configuration
+#define CONSULTATION_DISPLAY_TIMEOUT 60000  // Time to display consultation request (60 seconds)
+#define CONSULTATION_SOUND_ENABLED true     // Enable sound for consultation notifications
+#define CONSULTATION_FLASH_INTERVAL 500     // Flashing interval for notification in milliseconds
+#define CONSULTATION_AUTO_TIMEOUT true      // Automatically timeout unanswered consultations
+#define CONSULTATION_MAX_QUEUE 5            // Maximum number of consultations to queue
+
+// Response Topic and Payload Format
+#define MQTT_TOPIC_RESPONSES "consultease/faculty/%d/responses"
+#define MQTT_QOS 2  // Use QoS 2 for consultation responses (exactly once)
+
 // === DISPLAY CONFIGURATION (2.4" 320x240 ST7789) ===
 #define TFT_CS 5
 #define TFT_RST 22

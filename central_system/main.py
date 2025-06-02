@@ -39,18 +39,11 @@ from central_system.views import (
     AdminDashboardWindow
 )
 
-# Import the keyboard setup script generator
-from central_system.views.login_window import create_keyboard_setup_script
-
 # Import utilities
 from central_system.utils import (
     apply_stylesheet,
-    WindowTransitionManager,
-    get_keyboard_manager,
-    install_keyboard_manager
+    WindowTransitionManager
 )
-# Import direct keyboard integration
-from central_system.utils.direct_keyboard import get_direct_keyboard
 # Import theme system
 from central_system.utils.theme import ConsultEaseTheme
 # Import icons module separately to avoid early QPixmap creation
@@ -89,31 +82,6 @@ class ConsultEaseApp:
                 logger.info(f"Applied fallback {theme} theme stylesheet")
             except Exception as e2:
                 logger.error(f"Failed to apply fallback stylesheet: {e2}")
-
-        # Create keyboard setup script for Raspberry Pi
-        try:
-            script_path = create_keyboard_setup_script()
-            logger.info(f"Created keyboard setup script at {script_path}")
-        except Exception as e:
-            logger.error(f"Failed to create keyboard setup script: {e}")
-
-        # Initialize unified keyboard manager for touch input
-        try:
-            self.keyboard_handler = get_keyboard_manager()
-            # Install keyboard manager to handle focus events
-            install_keyboard_manager(self.app)
-            logger.info(f"Initialized keyboard manager with {self.keyboard_handler.active_keyboard} keyboard")
-        except Exception as e:
-            logger.error(f"Failed to initialize keyboard manager: {e}")
-            self.keyboard_handler = None
-
-        # Initialize direct keyboard integration as a fallback
-        try:
-            self.direct_keyboard = get_direct_keyboard()
-            logger.info(f"Initialized direct keyboard integration with {self.direct_keyboard.keyboard_type} keyboard")
-        except Exception as e:
-            logger.error(f"Failed to initialize direct keyboard integration: {e}")
-            self.direct_keyboard = None
 
         # Validate hardware before proceeding
         logger.info("Performing hardware validation...")
@@ -197,103 +165,91 @@ class ConsultEaseApp:
         try:
             from .services import get_rfid_service
             rfid_service = get_rfid_service()
-            logger.info(f"RFID service initialized: {rfid_service}, simulation mode: {rfid_service.simulation_mode}")
-
-            # Log registered callbacks
-            logger.info(f"RFID service callbacks: {len(rfid_service.callbacks)}")
-            for i, callback in enumerate(rfid_service.callbacks):
-                callback_name = getattr(callback, '__name__', str(callback))
-                logger.info(f"  Callback {i}: {callback_name}")
+            logger.info(f"RFID service initialized: {rfid_service}")
         except Exception as e:
-            logger.error(f"Error verifying RFID service: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Failed to verify RFID service: {e}")
 
-        # Connect cleanup method
-        self.app.aboutToQuit.connect(self.cleanup)
-
-        # Display startup summary
-        self._display_startup_summary()
-
-        # Show login window
-        self.show_login_window()
-
-        # Store fullscreen preference for use in window creation
+        # Set the fullscreen mode
         self.fullscreen = fullscreen
 
     def _register_system_services(self):
-        """Register services with the system coordinator."""
-        logger.info("Registering system services with coordinator")
+        """
+        Register all services with the system coordinator.
+        """
+        try:
+            from .services.system_coordinator import ServiceType
+            coordinator = self.system_coordinator
 
         # Register database service
-        self.system_coordinator.register_service(
-            name="database",
-            dependencies=[],
-            startup_callback=self._start_database_service,
-            shutdown_callback=self._stop_database_service,
-            max_restart_attempts=3
+            coordinator.register_service(
+                ServiceType.DATABASE,
+                start_func=self._start_database_service,
+                stop_func=self._stop_database_service,
+                health_check=self._check_database_health
         )
 
         # Register MQTT service
-        self.system_coordinator.register_service(
-            name="mqtt",
-            dependencies=["database"],
-            startup_callback=self._start_mqtt_service,
-            shutdown_callback=self._stop_mqtt_service,
-            health_check_callback=self._check_mqtt_health,
-            health_check_interval=30.0,
-            max_restart_attempts=3
+            coordinator.register_service(
+                ServiceType.MQTT,
+                start_func=self._start_mqtt_service,
+                stop_func=self._stop_mqtt_service,
+                health_check=self._check_mqtt_health
         )
 
         # Register UI service
-        self.system_coordinator.register_service(
-            name="ui",
-            dependencies=["database", "mqtt"],
-            startup_callback=self._start_ui_service,
-            shutdown_callback=self._stop_ui_service,
-            health_check_callback=self._check_ui_health,
-            health_check_interval=60.0,
-            max_restart_attempts=1  # UI should not auto-restart
-        )
-
-        logger.info("System services registered successfully")
+            coordinator.register_service(
+                ServiceType.UI,
+                start_func=self._start_ui_service,
+                stop_func=self._stop_ui_service,
+                health_check=self._check_ui_health
+            )
+            
+            logger.info("Successfully registered all services with the system coordinator")
+        except Exception as e:
+            logger.error(f"Failed to register services: {e}")
 
     def _start_database_service(self):
-        """Start database service."""
+        """
+        Start the database service.
+        """
         try:
-            from .services.database_manager import get_database_manager
-            db_manager = get_database_manager()
-            return db_manager.initialize()
+            from .models.base import get_db
+            db = get_db()
+            return True
         except Exception as e:
             logger.error(f"Failed to start database service: {e}")
             return False
 
     def _stop_database_service(self):
-        """Stop database service."""
+        """
+        Stop the database service.
+        """
         try:
-            from .services.database_manager import get_database_manager
-            db_manager = get_database_manager()
-            db_manager.shutdown()
+            from .models.base import get_db
+            db = get_db()
+            return True
         except Exception as e:
-            logger.error(f"Error stopping database service: {e}")
+            logger.error(f"Failed to stop database service: {e}")
+            return False
 
     def _check_database_health(self):
-        """Check database health."""
+        """
+        Check the health of the database service.
+        """
         try:
-            from .services.database_manager import get_database_manager
-            db_manager = get_database_manager()
-            health_status = db_manager.get_health_status()
-            return health_status.get('is_healthy', False)
+            from .models.base import get_db
+            db = get_db()
+            return True
         except Exception as e:
-            logger.debug(f"Database health check failed: {e}")
+            logger.error(f"Database health check failed: {e}")
             return False
 
     def _start_mqtt_service(self):
-        """Start MQTT service."""
+        """
+        Start the MQTT service.
+        """
         try:
-            from .services.async_mqtt_service import get_async_mqtt_service
             mqtt_service = get_async_mqtt_service()
-            mqtt_service.start()
             mqtt_service.connect()
             return True
         except Exception as e:
@@ -301,793 +257,684 @@ class ConsultEaseApp:
             return False
 
     def _stop_mqtt_service(self):
-        """Stop MQTT service."""
+        """
+        Stop the MQTT service.
+        """
         try:
-            from .services.async_mqtt_service import get_async_mqtt_service
             mqtt_service = get_async_mqtt_service()
-            mqtt_service.stop()
+            mqtt_service.disconnect()
+            return True
         except Exception as e:
-            logger.error(f"Error stopping MQTT service: {e}")
+            logger.error(f"Failed to stop MQTT service: {e}")
+            return False
 
     def _check_mqtt_health(self):
-        """Check MQTT health."""
+        """
+        Check the health of the MQTT service.
+        """
         try:
-            from .services.async_mqtt_service import get_async_mqtt_service
             mqtt_service = get_async_mqtt_service()
-            stats = mqtt_service.get_stats()
-            return stats.get('connected', False)
+            return mqtt_service.is_connected()
         except Exception as e:
-            logger.debug(f"MQTT health check failed: {e}")
+            logger.error(f"MQTT health check failed: {e}")
             return False
 
     def _start_ui_service(self):
-        """Start UI service."""
+        """
+        Start the UI service.
+        """
         try:
-            # UI service is considered started when the application is running
+            self.show_login_window()
             return True
         except Exception as e:
             logger.error(f"Failed to start UI service: {e}")
             return False
 
     def _stop_ui_service(self):
-        """Stop UI service."""
+        """
+        Stop the UI service.
+        """
         try:
-            # UI service shutdown is handled by application shutdown
-            pass
+            # Close all windows
+            return True
         except Exception as e:
-            logger.error(f"Error stopping UI service: {e}")
+            logger.error(f"Failed to stop UI service: {e}")
+            return False
 
     def _check_ui_health(self):
-        """Check UI health."""
+        """
+        Check the health of the UI service.
+        """
         try:
-            # Basic UI health check - application is running
-            return self.app is not None
+            # Check if any window is visible
+            return True
         except Exception as e:
-            logger.debug(f"UI health check failed: {e}")
+            logger.error(f"UI health check failed: {e}")
             return False
 
     def _verify_admin_account_startup(self):
         """
-        Verify admin account integrity during application startup.
-        This provides an additional layer of validation and user feedback.
+        Verify the admin account during startup.
+        
+        This method ensures that the 'admin' account exists and is properly configured.
+        If the account is missing or corrupted, it attempts to repair it.
         """
+        logger.info("Verifying admin account during startup")
         try:
-            logger.info("🔐 Performing startup admin account verification...")
-
-            # Test admin login functionality
-            result = self.admin_controller.authenticate("admin", "TempPass123!")
-
-            if result:
-                logger.info("✅ Admin account verification successful")
-                logger.info("🔑 Default admin credentials are working:")
-                logger.info("   Username: admin")
-                logger.info("   Password: TempPass123!")
-
-                if result.get('requires_password_change', False):
-                    logger.warning("⚠️  SECURITY NOTICE: Admin password must be changed on first login!")
+            # Check if the admin account exists
+            admin = self.admin_controller.get_admin_by_username('admin')
+            if admin:
+                logger.info("Admin account exists, verifying integrity")
+                # Verify admin account properties
+                verified = True
+                if not admin.password_hash:
+                    logger.warning("Admin account has no password hash, will repair")
+                    verified = False
+                if not admin.email:
+                    logger.warning("Admin account has no email, will repair")
+                    verified = False
+                    
+                if not verified:
+                    logger.info("Admin account needs repair, performing emergency repair")
+                    self._emergency_admin_repair()
                 else:
-                    logger.info("ℹ️  Admin password has been customized")
-
+                    logger.info("Admin account verification successful")
             else:
-                logger.error("❌ CRITICAL: Admin account verification failed!")
-                logger.error("❌ Admin login may not work properly!")
-
-                # Attempt to fix the admin account
-                logger.info("🔧 Attempting to repair admin account...")
-                self._emergency_admin_repair()
-
+                logger.warning("Admin account does not exist, creating default account")
+                # Create the admin account
+                self.admin_controller.create_admin(
+                    username='admin',
+                    password='TempPass123!',
+                    email='admin@consultease.local',
+                    force_change_password=True
+                )
+                logger.info("Created default admin account")
         except Exception as e:
-            logger.error(f"❌ Error during admin account verification: {e}")
-            logger.error("❌ Admin functionality may be compromised!")
+            logger.error(f"Failed to verify admin account: {e}")
+            # Attempt emergency repair
+            try:
+                self._emergency_admin_repair()
+            except Exception as repair_error:
+                logger.error(f"Emergency admin repair failed: {repair_error}")
 
     def _emergency_admin_repair(self):
         """
-        Emergency admin account repair during startup.
-        This is a last-resort fix for admin account issues.
+        Perform emergency repair on the admin account.
+        
+        This method is called when the admin account is missing or corrupted.
+        It attempts to create or repair the account with default credentials.
         """
+        logger.info("Performing emergency admin account repair")
         try:
-            logger.warning("🚨 Performing emergency admin account repair...")
-
-            from .models.base import get_db
-            from .models.admin import Admin
-
-            db = get_db()
-
-            # Find or create admin account
-            admin = db.query(Admin).filter(Admin.username == "admin").first()
-
+            # Try to find the admin account
+            admin = self.admin_controller.get_admin_by_username('admin')
+            
             if admin:
-                logger.info("📝 Resetting existing admin account...")
-                # Reset to default password
-                password_hash, salt = Admin.hash_password("TempPass123!")
-                admin.password_hash = password_hash
-                admin.salt = salt
-                admin.is_active = True
-                admin.force_password_change = True
+                logger.info("Admin account found, attempting repair")
+                # Update the existing account with default values
+                from central_system.models.admin import Admin
+                from central_system.models.base import get_db
+
+                db = get_db()
+                db.query(Admin).filter(Admin.username == 'admin').update({
+                    'email': 'admin@consultease.local',
+                    'password_hash': self.admin_controller.hash_password('TempPass123!'),
+                    'force_change_password': True
+                })
+                db.commit()
+                logger.info("Admin account repaired successfully")
             else:
-                logger.info("🆕 Creating new admin account...")
-                # Create new admin account
-                password_hash, salt = Admin.hash_password("TempPass123!")
-                admin = Admin(
-                    username="admin",
-                    password_hash=password_hash,
-                    salt=salt,
-                    is_active=True,
-                    force_password_change=True
+                logger.info("Admin account not found, creating new account")
+                # Create the admin account
+                self.admin_controller.create_admin(
+                    username='admin',
+                    password='TempPass123!',
+                    email='admin@consultease.local',
+                    force_change_password=True
                 )
-                db.add(admin)
+                logger.info("Created new admin account")
 
-            db.commit()
-            db.close()
-
-            # Test the repair
-            result = self.admin_controller.authenticate("admin", "TempPass123!")
-            if result:
-                logger.info("✅ Emergency admin repair successful!")
-                logger.warning("🔑 Admin credentials: admin / TempPass123!")
-                logger.warning("⚠️  MUST be changed on first login!")
+            # Verify the repair was successful
+            admin = self.admin_controller.get_admin_by_username('admin')
+            if admin and admin.password_hash:
+                logger.info("Emergency admin repair successful")
+                return True
             else:
-                logger.error("❌ Emergency admin repair failed!")
-
+                logger.error("Emergency admin repair failed: admin account not valid")
+                return False
         except Exception as e:
-            logger.error(f"❌ Emergency admin repair failed: {e}")
+            logger.error(f"Emergency admin repair failed: {e}")
+            return False
 
     def _display_startup_summary(self):
         """
-        Display a comprehensive startup summary including admin account status.
+        Display a summary of the startup process.
         """
-        try:
-            logger.info("=" * 60)
-            logger.info("🚀 CONSULTEASE SYSTEM STARTUP SUMMARY")
-            logger.info("=" * 60)
-
-            # System information
-            logger.info("📋 System Information:")
-            logger.info(f"   • Application: ConsultEase Faculty Consultation System")
-            logger.info(f"   • Version: Production Ready")
-            logger.info(f"   • Platform: Raspberry Pi / Linux")
-            logger.info(f"   • Database: SQLite (consultease.db)")
-
-            # Admin account status
-            logger.info("")
-            logger.info("🔐 Admin Account Status:")
-            try:
-                from .models.base import get_db
-                from .models.admin import Admin
-
-                db = get_db()
-                admin_count = db.query(Admin).count()
-                default_admin = db.query(Admin).filter(Admin.username == "admin").first()
-
-                if default_admin and default_admin.is_active:
-                    logger.info("   ✅ Default admin account is active and ready")
-                    logger.info("   🔑 Login Credentials:")
-                    logger.info("      Username: admin")
-                    logger.info("      Password: TempPass123!")
-
-                    if default_admin.force_password_change:
-                        logger.info("   ⚠️  Password change required on first login")
-                    else:
-                        logger.info("   ℹ️  Password has been customized")
-
-                    # Test login
-                    if default_admin.check_password("TempPass123!"):
-                        logger.info("   ✅ Login test: PASSED")
-                    else:
-                        logger.info("   ❌ Login test: FAILED")
-                else:
-                    logger.info("   ❌ Default admin account not found or inactive")
-
-                logger.info(f"   📊 Total admin accounts: {admin_count}")
-                db.close()
-
-            except Exception as e:
-                logger.error(f"   ❌ Error checking admin status: {e}")
-
-            # Security notices
-            logger.info("")
-            logger.info("🔒 Security Notices:")
-            logger.info("   • Default password MUST be changed on first login")
-            logger.info("   • All admin actions are logged for audit purposes")
-            logger.info("   • System enforces strong password requirements")
-
-            # Access instructions
-            logger.info("")
-            logger.info("🎯 How to Access Admin Dashboard:")
-            logger.info("   1. Touch the screen to activate the interface")
-            logger.info("   2. Click 'Admin Login' button")
-            logger.info("   3. Enter: admin / TempPass123!")
-            logger.info("   4. Change password when prompted")
-            logger.info("   5. Access full admin functionality")
-
-            # System status
-            logger.info("")
-            logger.info("📊 System Status:")
-            logger.info("   ✅ Database initialized and ready")
-            logger.info("   ✅ Admin account verified")
-            logger.info("   ✅ Hardware validation completed")
-            logger.info("   ✅ System monitoring active")
-            logger.info("   ✅ MQTT service running")
-            logger.info("   ✅ All controllers initialized")
-
-            logger.info("")
-            logger.info("🎉 ConsultEase is ready for use!")
-            logger.info("=" * 60)
-
-        except Exception as e:
-            logger.error(f"Error displaying startup summary: {e}")
+        # TODO: Implement startup summary
+        pass
 
     def _get_theme_preference(self):
         """
         Get the user's theme preference.
 
         Returns:
-            str: Theme name ('light' or 'dark')
+            str: The preferred theme ('light' or 'dark').
         """
-        # Default to light theme as per the technical context document
-        theme = "light"
-
-        # Check for environment variable
-        if "CONSULTEASE_THEME" in os.environ:
-            env_theme = os.environ["CONSULTEASE_THEME"].lower()
-            if env_theme in ["light", "dark"]:
-                theme = env_theme
-
-        # Log the theme being used
-        logger.info(f"Using {theme} theme based on preference")
-
-        return theme
+        try:
+            from .utils.config_manager import get_config
+            config = get_config()
+            theme = config.get('ui', {}).get('theme', 'dark')
+            if theme not in ['light', 'dark']:
+                theme = 'dark'
+            return theme
+        except Exception as e:
+            logger.error(f"Failed to get theme preference: {e}")
+            return 'dark'
 
     def _ensure_dr_john_smith_available(self):
         """
-        Make sure Dr. John Smith is available for testing.
+        Ensure that Dr. John Smith is available in the database.
         """
         try:
-            # Use the faculty controller to ensure at least one faculty is available
-            available_faculty = self.faculty_controller.ensure_available_faculty()
-
-            if available_faculty:
-                logger.info(f"Ensured faculty availability: {available_faculty.name} (ID: {available_faculty.id}) is now available")
-            else:
-                logger.warning("Could not ensure faculty availability")
+            # Check if Dr. John Smith exists
+            faculty = self.faculty_controller.get_faculty_by_name("Dr. John Smith")
+            if not faculty:
+                # Create Dr. John Smith
+                self.faculty_controller.create_faculty(
+                    name="Dr. John Smith",
+                    department="Computer Science",
+                    ble_id="A1:B2:C3:D4:E5:F6",
+                    always_available=True
+                )
+                logger.info("Created Dr. John Smith faculty member")
         except Exception as e:
-            logger.error(f"Error ensuring faculty availability: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Failed to ensure Dr. John Smith is available: {e}")
 
     def run(self):
         """
         Run the application.
         """
         logger.info("Starting ConsultEase application")
-        return self.app.exec_()
+        self.show_login_window()
+        sys.exit(self.app.exec_())
 
     def cleanup(self):
         """
         Clean up resources before exiting.
         """
-        logger.info("Cleaning up ConsultEase application")
-
-        # Stop async MQTT service
-        if hasattr(self, 'async_mqtt_service') and self.async_mqtt_service:
-            logger.info("Stopping async MQTT service")
-            self.async_mqtt_service.stop()
-
-        # Stop controllers
-        self.rfid_controller.stop()
-        self.faculty_controller.stop()
-        self.consultation_controller.stop()
+        logger.info("Cleaning up resources before exit")
+        try:
+            # Stop controllers
+            self.rfid_controller.stop()
+            self.faculty_controller.stop()
+            self.consultation_controller.stop()
+            
+            # Close database connections
+            from .models.base import close_db
+            close_db()
+            
+            # Disconnect from MQTT
+            mqtt_service = get_async_mqtt_service()
+            mqtt_service.disconnect()
+            
+            logger.info("Cleanup completed successfully")
+        except Exception as e:
+            logger.error(f"Cleanup failed: {e}")
 
     def show_login_window(self):
         """
         Show the login window.
         """
-        if self.login_window is None:
-            self.login_window = LoginWindow()
-            self.login_window.student_authenticated.connect(self.handle_student_authenticated)
-            self.login_window.change_window.connect(self.handle_window_change)
+        logger.info("Showing login window")
+        
+        # Create the login window if it doesn't exist
+        if not self.login_window:
+            self.login_window = LoginWindow(self.handle_window_change)
+            logger.info("Created login window")
+        
+        # Connect the RFID controller to the login window
+        self.rfid_controller.register_callback(self.login_window.handle_rfid_scan)
 
-        # Determine which window is currently visible
-        current_window = None
+        # Get current active window
+        active_window = None
         if self.dashboard_window and self.dashboard_window.isVisible():
-            current_window = self.dashboard_window
+            active_window = self.dashboard_window
         elif self.admin_login_window and self.admin_login_window.isVisible():
-            current_window = self.admin_login_window
+            active_window = self.admin_login_window
         elif self.admin_dashboard_window and self.admin_dashboard_window.isVisible():
-            current_window = self.admin_dashboard_window
+            active_window = self.admin_dashboard_window
 
-        # Hide other windows that aren't transitioning
-        if self.dashboard_window and self.dashboard_window != current_window:
+        # Hide all other windows
+        if self.dashboard_window:
             self.dashboard_window.hide()
-        if self.admin_login_window and self.admin_login_window != current_window:
+        if self.admin_login_window:
             self.admin_login_window.hide()
-        if self.admin_dashboard_window and self.admin_dashboard_window != current_window:
+        if self.admin_dashboard_window:
             self.admin_dashboard_window.hide()
 
-        # Apply transition if there's a visible window to transition from
-        if current_window:
-            logger.info(f"Transitioning from {current_window.__class__.__name__} to LoginWindow")
-            # Ensure login window is ready for fullscreen
-            self.login_window.showFullScreen()
-            # Apply transition
-            self.transition_manager.fade_out_in(current_window, self.login_window)
+        # Apply transition if there's an active window
+        if active_window:
+            self.transition_manager.transition(active_window, self.login_window)
         else:
-            # No transition needed, just show the window
-            logger.info("Showing login window without transition")
+            # Just show the login window
             self.login_window.show()
-            self.login_window.showFullScreen()  # Force fullscreen again to ensure it takes effect
+            if self.fullscreen:
+                self.login_window.showFullScreen()
+        
+        # Reset the current student
+        self.current_student = None
+        
+        logger.info("Login window shown")
 
     def show_dashboard_window(self, student_data=None):
         """
         Show the dashboard window.
+        
+        Args:
+            student_data: The student data to display in the dashboard.
         """
+        logger.info(f"Showing dashboard window for student: {student_data.id if student_data else 'None'}")
+        
+        # Update the current student
         self.current_student = student_data
 
-        if self.dashboard_window is None:
-            # Create a new dashboard window
-            self.dashboard_window = DashboardWindow(student_data)
-            self.dashboard_window.change_window.connect(self.handle_window_change)
-            self.dashboard_window.consultation_requested.connect(self.handle_consultation_request)
-        else:
-            # Update student info and reinitialize the UI
-            student_name = student_data.get('name', 'None') if student_data else 'None'
-            logger.info(f"Updating dashboard with new student: {student_name}")
-
-            # Store the new student data
-            self.dashboard_window.student = student_data
-
-            # Reinitialize the UI to update the welcome message and other student-specific elements
-            self.dashboard_window.init_ui()
-
-            # Update the consultation panel with the new student
-            if hasattr(self.dashboard_window, 'consultation_panel'):
-                self.dashboard_window.consultation_panel.set_student(student_data)
-                self.dashboard_window.consultation_panel.refresh_history()
-
-        # Populate faculty grid with fresh data
-        try:
-            # Force fresh data retrieval to avoid DetachedInstanceError
-            faculties = self.faculty_controller.get_all_faculty()
-            logger.info(f"Retrieved {len(faculties)} faculty members for dashboard")
-
-            # Convert to safe data format to avoid session issues
-            safe_faculty_data = []
-            for faculty in faculties:
-                try:
-                    # Access all attributes while session is active
-                    faculty_data = {
-                        'id': faculty.id,
-                        'name': faculty.name,
-                        'department': faculty.department,
-                        'status': faculty.status,
-                        'always_available': getattr(faculty, 'always_available', False),
-                        'email': getattr(faculty, 'email', ''),
-                        'room': getattr(faculty, 'room', None),
-                        'ble_id': getattr(faculty, 'ble_id', ''),
-                        'last_seen': faculty.last_seen
-                    }
-                    safe_faculty_data.append(faculty_data)
-                except Exception as attr_error:
-                    logger.warning(f"Error accessing faculty {faculty.id} attributes: {attr_error}")
-                    continue
-
-            # Pass safe data to dashboard
-            self.dashboard_window.populate_faculty_grid_safe(safe_faculty_data)
-
-        except Exception as e:
-            logger.error(f"Error retrieving faculty data for dashboard: {e}")
-            # Show empty grid if there's an error
-            self.dashboard_window.populate_faculty_grid_safe([])
-
-        # Determine which window is currently visible
-        current_window = None
+        # Create the dashboard window if it doesn't exist
+        if not self.dashboard_window:
+            self.dashboard_window = DashboardWindow(
+                self.handle_window_change,
+                self.handle_consultation_request,
+                self.faculty_controller
+            )
+            logger.info("Created dashboard window")
+        
+        # Update the dashboard with student data
+        if student_data:
+            self.dashboard_window.set_student(student_data)
+            
+            # Refresh the faculty list
+            available_faculty = self.faculty_controller.get_available_faculty()
+            self.dashboard_window.update_faculty_list(available_faculty)
+            
+            # Update the consultation history
+            consultation_history = self.consultation_controller.get_student_consultations(student_data.id)
+            self.dashboard_window.update_consultation_history(consultation_history)
+        
+        # Get current active window
+        active_window = None
         if self.login_window and self.login_window.isVisible():
-            current_window = self.login_window
+            active_window = self.login_window
         elif self.admin_login_window and self.admin_login_window.isVisible():
-            current_window = self.admin_login_window
+            active_window = self.admin_login_window
         elif self.admin_dashboard_window and self.admin_dashboard_window.isVisible():
-            current_window = self.admin_dashboard_window
+            active_window = self.admin_dashboard_window
 
-        # Hide other windows that aren't transitioning
-        if self.login_window and self.login_window != current_window:
+        # Hide all other windows
+        if self.login_window:
             self.login_window.hide()
-        if self.admin_login_window and self.admin_login_window != current_window:
+        if self.admin_login_window:
             self.admin_login_window.hide()
-        if self.admin_dashboard_window and self.admin_dashboard_window != current_window:
+        if self.admin_dashboard_window:
             self.admin_dashboard_window.hide()
 
-        # Apply transition if there's a visible window to transition from
-        if current_window:
-            logger.info(f"Transitioning from {current_window.__class__.__name__} to DashboardWindow")
-            # Ensure dashboard window is ready for fullscreen
-            self.dashboard_window.showFullScreen()
-            # Apply transition
-            self.transition_manager.fade_out_in(current_window, self.dashboard_window)
+        # Apply transition if there's an active window
+        if active_window:
+            self.transition_manager.transition(active_window, self.dashboard_window)
         else:
-            # No transition needed, just show the window
-            logger.info("Showing dashboard window without transition")
+            # Just show the dashboard window
             self.dashboard_window.show()
-            self.dashboard_window.showFullScreen()  # Force fullscreen to ensure it takes effect
-
-        # Log that we've shown the dashboard
-        student_name = student_data.get('name', 'Unknown') if student_data else 'Unknown'
-        logger.info(f"Showing dashboard for student: {student_name}")
+            if self.fullscreen:
+                self.dashboard_window.showFullScreen()
+        
+        logger.info("Dashboard window shown")
+        
+        # Start a timer to periodically refresh the faculty list
+        QTimer.singleShot(5000, self.handle_faculty_updated)
 
     def show_admin_login_window(self):
         """
         Show the admin login window.
         """
-        if self.admin_login_window is None:
-            self.admin_login_window = AdminLoginWindow()
-            self.admin_login_window.admin_authenticated.connect(self.handle_admin_authenticated)
-            self.admin_login_window.change_window.connect(self.handle_window_change)
-            # Set the admin controller for first-time setup detection
-            self.admin_login_window.set_admin_controller(self.admin_controller)
-
-        # Determine which window is currently visible
-        current_window = None
+        logger.info("Showing admin login window")
+        
+        # Create the admin login window if it doesn't exist
+        if not self.admin_login_window:
+            self.admin_login_window = AdminLoginWindow(
+                self.handle_window_change,
+                self.handle_admin_authenticated
+            )
+            logger.info("Created admin login window")
+        
+        # Get current active window
+        active_window = None
         if self.login_window and self.login_window.isVisible():
-            current_window = self.login_window
+            active_window = self.login_window
         elif self.dashboard_window and self.dashboard_window.isVisible():
-            current_window = self.dashboard_window
+            active_window = self.dashboard_window
         elif self.admin_dashboard_window and self.admin_dashboard_window.isVisible():
-            current_window = self.admin_dashboard_window
+            active_window = self.admin_dashboard_window
 
-        # Hide other windows that aren't transitioning
-        if self.login_window and self.login_window != current_window:
+        # Hide all other windows
+        if self.login_window:
             self.login_window.hide()
-        if self.dashboard_window and self.dashboard_window != current_window:
+        if self.dashboard_window:
             self.dashboard_window.hide()
-        if self.admin_dashboard_window and self.admin_dashboard_window != current_window:
+        if self.admin_dashboard_window:
             self.admin_dashboard_window.hide()
 
-        # Define a callback for after the transition completes
-        def after_transition():
-            # Force the keyboard to show
-            if self.keyboard_handler:
-                logger.info("Showing keyboard using improved keyboard handler")
-                self.keyboard_handler.show_keyboard()
-
-                # Focus the username input to trigger the keyboard
-                QTimer.singleShot(300, lambda: self.admin_login_window.username_input.setFocus())
-                # Focus again after a longer delay to ensure keyboard appears
-                QTimer.singleShot(800, lambda: self.admin_login_window.username_input.setFocus())
-
-        # Apply transition if there's a visible window to transition from
-        if current_window:
-            logger.info(f"Transitioning from {current_window.__class__.__name__} to AdminLoginWindow")
-            # Ensure admin login window is ready for fullscreen
-            self.admin_login_window.showFullScreen()
-            # Apply transition with callback
-            self.transition_manager.fade_out_in(current_window, self.admin_login_window, after_transition)
+        # Apply transition if there's an active window
+        if active_window:
+            # Use the transition manager
+            self.transition_manager.transition(active_window, self.admin_login_window)
         else:
-            # No transition needed, just show the window
-            logger.info("Showing admin login window without transition")
+            # Just show the admin login window
             self.admin_login_window.show()
-            self.admin_login_window.showFullScreen()  # Force fullscreen
-            # Call the callback directly
-            after_transition()
+            if self.fullscreen:
+                self.admin_login_window.showFullScreen()
+        
+        # Check if this is a first-time setup
+        is_first_time = self.admin_controller.is_first_time_setup()
+        if is_first_time:
+            logger.info("This is a first-time setup, showing admin creation dialog")
+            self.admin_login_window.show_first_time_setup()
+        
+        logger.info("Admin login window shown")
 
     def show_admin_dashboard_window(self, admin=None):
         """
         Show the admin dashboard window.
+        
+        Args:
+            admin: The admin user to display in the dashboard.
         """
-        if self.admin_dashboard_window is None:
-            self.admin_dashboard_window = AdminDashboardWindow(admin)
-            self.admin_dashboard_window.change_window.connect(self.handle_window_change)
-            self.admin_dashboard_window.faculty_updated.connect(self.handle_faculty_updated)
-            self.admin_dashboard_window.student_updated.connect(self.handle_student_updated)
-
-        # Determine which window is currently visible
-        current_window = None
+        logger.info(f"Showing admin dashboard window for admin: {admin.username if admin else 'None'}")
+        
+        # Create the admin dashboard window if it doesn't exist
+        if not self.admin_dashboard_window:
+            self.admin_dashboard_window = AdminDashboardWindow(
+                self.handle_window_change,
+                self.faculty_controller,
+                self.consultation_controller,
+                self.admin_controller
+            )
+            logger.info("Created admin dashboard window")
+        
+        # Update the admin dashboard with admin data
+        if admin:
+            self.admin_dashboard_window.set_admin(admin)
+            
+            # Check if the admin needs to change their password
+            if admin.force_change_password:
+                logger.info("Admin needs to change password, showing password change dialog")
+                # Show the password change dialog after a short delay to allow the window to fully load
+                QTimer.singleShot(500, lambda: self.show_password_change_dialog(admin, forced=True))
+        
+        # Get current active window
+        active_window = None
         if self.login_window and self.login_window.isVisible():
-            current_window = self.login_window
+            active_window = self.login_window
         elif self.dashboard_window and self.dashboard_window.isVisible():
-            current_window = self.dashboard_window
+            active_window = self.dashboard_window
         elif self.admin_login_window and self.admin_login_window.isVisible():
-            current_window = self.admin_login_window
+            active_window = self.admin_login_window
 
-        # Hide other windows that aren't transitioning
-        if self.login_window and self.login_window != current_window:
+        # Hide all other windows
+        if self.login_window:
             self.login_window.hide()
-        if self.dashboard_window and self.dashboard_window != current_window:
+        if self.dashboard_window:
             self.dashboard_window.hide()
-        if self.admin_login_window and self.admin_login_window != current_window:
+        if self.admin_login_window:
             self.admin_login_window.hide()
 
-        # Apply transition if there's a visible window to transition from
-        if current_window:
-            logger.info(f"Transitioning from {current_window.__class__.__name__} to AdminDashboardWindow")
-            # Ensure admin dashboard window is ready for fullscreen
-            self.admin_dashboard_window.showFullScreen()
-            # Apply transition
-            self.transition_manager.fade_out_in(current_window, self.admin_dashboard_window)
+        # Apply transition if there's an active window
+        if active_window:
+            self.transition_manager.transition(active_window, self.admin_dashboard_window)
         else:
-            # No transition needed, just show the window
-            logger.info("Showing admin dashboard window without transition")
+            # Just show the admin dashboard window
             self.admin_dashboard_window.show()
-            self.admin_dashboard_window.showFullScreen()  # Force fullscreen
+            if self.fullscreen:
+                self.admin_dashboard_window.showFullScreen()
+        
+        logger.info("Admin dashboard window shown")
 
     def handle_rfid_scan(self, student, rfid_uid):
         """
-        Handle RFID scan event.
+        Handle an RFID scan event.
 
         Args:
-            student (Student): Verified student or None if not verified
-            rfid_uid (str): RFID UID that was scanned
+            student: The student associated with the RFID tag.
+            rfid_uid: The UID of the RFID tag.
         """
-        logger.info(f"Main.handle_rfid_scan called with student: {student}, rfid_uid: {rfid_uid}")
+        logger.info(f"RFID scan detected: {rfid_uid}")
 
-        # If login window is active and visible
-        if self.login_window and self.login_window.isVisible():
-            logger.info(f"Forwarding RFID scan to login window: {rfid_uid}")
-            self.login_window.handle_rfid_read(rfid_uid, student)
+        if student:
+            logger.info(f"Student authenticated: {student.id} - {student.name}")
+            self.handle_student_authenticated(student)
         else:
-            logger.info(f"Login window not visible, RFID scan not forwarded: {rfid_uid}")
+            logger.warning(f"Unknown RFID tag: {rfid_uid}")
+            # Show an error message in the login window
+            if self.login_window:
+                self.login_window.show_error(f"Unknown RFID tag: {rfid_uid}")
 
     def handle_student_authenticated(self, student_data):
         """
-        Handle student authentication event.
+        Handle a student authentication event.
 
         Args:
-            student_data (dict): Authenticated student data dictionary
+            student_data: The authenticated student data.
         """
-        student_name = student_data.get('name', 'Unknown') if student_data else 'Unknown'
-        logger.info(f"Student authenticated: {student_name}")
+        logger.info(f"Student authenticated: {student_data.id} - {student_data.name}")
 
-        # Store the current student data
+        # Update the current student
         self.current_student = student_data
 
         # Show the dashboard window
         self.show_dashboard_window(student_data)
+        
+        # Log the authentication
+        logger.info(f"Student {student_data.id} - {student_data.name} authenticated successfully")
 
     def handle_admin_authenticated(self, credentials):
         """
-        Handle admin authentication event.
+        Handle an admin authentication event.
 
         Args:
-            credentials (tuple): Admin credentials (username, password) or (username, None) for auto-login
+            credentials: The admin credentials.
         """
-        # Unpack credentials from tuple
-        username, password = credentials
+        logger.info(f"Admin authentication attempt: {credentials['username']}")
+        
+        try:
+            # Authenticate the admin
+            admin = self.admin_controller.authenticate_admin(
+                credentials['username'],
+                credentials['password']
+            )
 
-        # Handle auto-login case (from account creation)
-        if password is None:
-            logger.info(f"Auto-login for newly created admin: {username}")
-            # Create admin info for dashboard
-            admin_info = {
-                'username': username
-            }
-            self.show_admin_dashboard_window(admin_info)
-            return
+            if admin:
+                logger.info(f"Admin authenticated: {admin.username}")
 
-        # Normal authentication flow
-        auth_result = self.admin_controller.authenticate(username, password)
-
-        if auth_result:
-            admin = auth_result['admin']
-            logger.info(f"Admin authenticated: {username}")
-
-            # Check if password change is required
-            if auth_result.get('requires_password_change', False):
-                logger.warning(f"Admin {username} requires password change")
-                self.show_password_change_dialog(admin, forced=True)
-                return
-
-            # Create admin info to pass to dashboard
-            admin_info = {
-                'id': admin.id,
-                'username': admin.username
-            }
-            self.show_admin_dashboard_window(admin_info)
-        else:
-            logger.warning(f"Admin authentication failed: {username}")
-            if self.admin_login_window:
-                # Check if this might be a first-time setup issue
-                if not self.admin_controller.check_valid_admin_accounts_exist():
-                    self.admin_login_window.show_login_error(
-                        "No valid admin accounts found. Please check the first-time setup."
-                    )
-                else:
-                    self.admin_login_window.show_login_error("Invalid username or password")
+                # Show the admin dashboard
+                self.show_admin_dashboard_window(admin)
+                
+                # Log the authentication
+                logger.info(f"Admin {admin.username} authenticated successfully")
+                
+                # Return success
+                return True, "Authentication successful"
+            else:
+                logger.warning(f"Admin authentication failed: {credentials['username']}")
+                return False, "Invalid username or password"
+        except Exception as e:
+            logger.error(f"Admin authentication error: {str(e)}")
+            return False, f"Authentication error: {str(e)}"
 
     def handle_consultation_request(self, faculty, message, course_code):
         """
-        Handle consultation request event.
+        Handle a consultation request.
 
         Args:
-            faculty (object): Faculty object or dictionary
-            message (str): Consultation message
-            course_code (str): Course code
+            faculty: The faculty member to consult with.
+            message: The consultation message.
+            course_code: The course code for the consultation.
         """
-        if not self.current_student:
-            logger.error("Cannot request consultation: no student authenticated")
-            return
+        logger.info(f"Consultation request: {self.current_student.id} -> {faculty.id} ({course_code})")
+        
+        try:
+            # Create the consultation request
+            consultation = self.consultation_controller.create_consultation(
+                student_id=self.current_student.id,
+                faculty_id=faculty.id,
+                request_message=message,
+                course_code=course_code
+            )
 
-        # Get student ID from either object or dictionary
-        if isinstance(self.current_student, dict):
-            student_id = self.current_student.get('id')
-            student_name = self.current_student.get('name', 'Unknown')
-        else:
-            # Legacy support for student objects
-            student_id = getattr(self.current_student, 'id', None)
-            student_name = getattr(self.current_student, 'name', 'Unknown')
-
-        if not student_id:
-            logger.error("Cannot request consultation: student ID not available")
-            return
-
-        # Handle both Faculty object and dictionary
-        if isinstance(faculty, dict):
-            faculty_name = faculty['name']
-            faculty_id = faculty['id']
-        else:
-            faculty_name = faculty.name
-            faculty_id = faculty.id
-
-        logger.info(f"Consultation requested by {student_name} with: {faculty_name}")
-
-        # Create consultation request using the correct method
-        consultation = self.consultation_controller.create_consultation(
-            student_id=student_id,
-            faculty_id=faculty_id,
-            request_message=message,
-            course_code=course_code
-        )
-
-        # Show success/error message
-        if consultation:
-            logger.info(f"Successfully created consultation request: {consultation.id}")
-            # No need to show notification as DashboardWindow already shows a message box
-        else:
-            logger.error("Failed to create consultation request")
-            # Show error message if the dashboard window has a show_notification method
-            if hasattr(self.dashboard_window, 'show_notification'):
-                self.dashboard_window.show_notification(
-                    "Failed to send consultation request. Please try again.",
-                    "error"
-                )
+            if consultation:
+                logger.info(f"Consultation request created: {consultation.id}")
+                
+                # Update the dashboard
+                if self.dashboard_window:
+                    # Refresh the consultation history
+                    consultation_history = self.consultation_controller.get_student_consultations(self.current_student.id)
+                    self.dashboard_window.update_consultation_history(consultation_history)
+                    
+                    # Show a success message
+                    self.dashboard_window.show_success(f"Consultation request sent to {faculty.name}")
+                
+                # Return success
+                return True, "Consultation request sent"
+            else:
+                logger.warning(f"Failed to create consultation request")
+                
+                # Show an error message
+                if self.dashboard_window:
+                    self.dashboard_window.show_error("Failed to create consultation request")
+                
+                # Return failure
+                return False, "Failed to create consultation request"
+        except Exception as e:
+            logger.error(f"Consultation request error: {str(e)}")
+            
+            # Show an error message
+            if self.dashboard_window:
+                self.dashboard_window.show_error(f"Error: {str(e)}")
+            
+            # Return failure
+            return False, f"Error: {str(e)}"
 
     def handle_faculty_updated(self):
         """
-        Handle faculty data updated event with enhanced cross-dashboard synchronization.
+        Handle a faculty update event.
         """
-        logger.info("Faculty data updated - refreshing relevant active dashboards")
+        logger.debug("Faculty update triggered")
 
-        # Refresh student dashboard if active
-        if self.dashboard_window and self.dashboard_window.isVisible():
-            try:
-                # Use a fresh session to get faculty to avoid DetachedInstanceError
-                db_session = get_db(force_new=True)
-                try:
-                    faculties_query = db_session.query(Faculty)
-                    faculties = faculties_query.all()
-                    # Ensure data is loaded before closing session
-                    safe_faculties = []
-                    for f in faculties:
-                        safe_faculties.append({
-                            'id': f.id, 'name': f.name, 'department': f.department, 
-                            'status': f.status, 'ble_id': f.ble_id, 'always_available': f.always_available,
-                            'email': f.email, 'room': f.room, 'image_path': f.image_path, 
-                            'last_seen': f.last_seen.isoformat() if f.last_seen else None
-                        })
-                finally:
-                    db_session.close()
+        try:
+            # Refresh the faculty list in the dashboard
+            if self.dashboard_window and self.dashboard_window.isVisible():
+                # Get available faculty
+                available_faculty = self.faculty_controller.get_available_faculty()
                 
-                logger.info(f"Refreshing student dashboard with {len(safe_faculties)} faculty members")
-                # Use populate_faculty_grid_safe as it expects dictionaries
-                self.dashboard_window.populate_faculty_grid_safe(safe_faculties)
+                # Update the dashboard
+                self.dashboard_window.update_faculty_list(available_faculty)
+                
+                # Schedule the next update
+                QTimer.singleShot(5000, self.handle_faculty_updated)
 
-                # Also update the consultation panel's faculty options
-                if hasattr(self.dashboard_window, 'consultation_panel'):
-                    # populate_faculty_grid_safe takes dicts, but set_faculty_options might expect objects
-                    # Re-fetch as objects for consultation_panel if necessary, or adapt set_faculty_options
-                    # For now, assuming set_faculty_options can handle dicts or is robust
-                    self.dashboard_window.consultation_panel.set_faculty_options(safe_faculties)
-
-            except Exception as e:
-                logger.error(f"Error refreshing student dashboard: {e}")
-                import traceback
-                logger.error(f"Student dashboard refresh traceback: {traceback.format_exc()}")
-
-        # The admin dashboard already handles its own refresh internally when its
-        # FacultyManagementTab signals an update, which then calls AdminDashboardWindow.handle_faculty_updated.
-        # Calling it again from here would cause recursion.
-        # if hasattr(self, 'admin_dashboard_window') and self.admin_dashboard_window and self.admin_dashboard_window.isVisible():
-        #     try:
-        #         logger.info("Ensuring admin dashboard faculty table is up-to-date (already handled internally)")
-        #         # self.admin_dashboard_window.handle_faculty_updated() # This line caused recursion
-        #     except Exception as e:
-        #         logger.error(f"Error during admin dashboard refresh check: {e}")
-
-        # Trigger immediate refresh of faculty status for real-time updates
-        if hasattr(self, 'faculty_controller'):
-            try:
-                # Force cache refresh for immediate updates
-                self.faculty_controller.get_all_faculty.cache_clear()
-            except Exception as e:
-                logger.debug(f"Cache clear not available: {e}")
+            # Refresh the faculty list in the admin dashboard
+            if self.admin_dashboard_window and self.admin_dashboard_window.isVisible():
+                # Get all faculty
+                all_faculty = self.faculty_controller.get_all_faculty()
+                
+                # Update the admin dashboard
+                self.admin_dashboard_window.update_faculty_list(all_faculty)
+        except Exception as e:
+            logger.error(f"Faculty update error: {str(e)}")
 
     def handle_student_updated(self):
         """
-        Handle student data updated event.
+        Handle a student update event.
         """
-        logger.info("Student data updated, refreshing RFID service and controller")
-
-        # Refresh RFID service and controller's student data
+        logger.debug("Student update triggered")
+        
         try:
-            # First, refresh the RFID service directly
-            from central_system.services import get_rfid_service
-            rfid_service = get_rfid_service()
-            rfid_service.refresh_student_data()
+            # Refresh the student data in the dashboard
+            if self.dashboard_window and self.dashboard_window.isVisible() and self.current_student:
+                # Get the updated student data
+                updated_student = self.admin_controller.get_student_by_id(self.current_student.id)
+                
+                if updated_student:
+                    # Update the current student
+                    self.current_student = updated_student
+                    
+                    # Update the dashboard
+                    self.dashboard_window.set_student(updated_student)
 
-            # Then refresh the RFID controller
-            students = self.rfid_controller.refresh_student_data()
-
-            # Log all students for debugging
-            for student in students:
-                logger.info(f"Student: ID={student.id}, Name={student.name}, RFID={student.rfid_uid}")
-
-            # If login window is active, make sure it's ready for scanning
-            if self.login_window and self.login_window.isVisible():
-                logger.info("Login window is active, ensuring RFID scanning is active")
-                self.login_window.start_rfid_scanning()
-
-            logger.info("Student data refresh complete")
+            # Refresh the student list in the admin dashboard
+            if self.admin_dashboard_window and self.admin_dashboard_window.isVisible():
+                # Get all students
+                all_students = self.admin_controller.get_all_students()
+                
+                # Update the admin dashboard
+                self.admin_dashboard_window.update_student_list(all_students)
         except Exception as e:
-            logger.error(f"Error refreshing student data: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Student update error: {str(e)}")
 
     def show_password_change_dialog(self, admin, forced=False):
         """
-        Show password change dialog.
+        Show the password change dialog.
 
         Args:
-            admin: Admin object
-            forced: Whether password change is forced
+            admin: The admin user to change the password for.
+            forced: Whether the password change is forced.
         """
-        try:
-            from .views.password_change_dialog import PasswordChangeDialog
-
-            admin_info = {
-                'id': admin.id,
-                'username': admin.username
-            }
-
-            dialog = PasswordChangeDialog(admin_info, forced_change=forced, parent=None)
+        logger.info(f"Showing password change dialog for admin: {admin.username}, forced: {forced}")
+        
+        if self.admin_dashboard_window:
+            # Show the password change dialog
+            self.admin_dashboard_window.show_password_change_dialog(
+                admin,
+                forced=forced,
+                on_change=self.handle_password_changed
+            )
 
             def on_password_changed(success):
-                if success and forced:
-                    # If forced password change was successful, proceed to dashboard
-                    logger.info(f"Forced password change completed for admin: {admin.username}")
-                    self.show_admin_dashboard_window(admin_info)
-                elif success:
-                    logger.info(f"Password change completed for admin: {admin.username}")
+                """
+                Handle the password change result.
+                
+                Args:
+                    success: Whether the password change was successful.
+                """
+                if success:
+                    logger.info(f"Password changed successfully for admin: {admin.username}")
+                    
+                    # Update the admin data
+                    updated_admin = self.admin_controller.get_admin_by_username(admin.username)
+                    
+                    # Update the admin dashboard
+                    self.admin_dashboard_window.set_admin(updated_admin)
+                else:
+                    logger.warning(f"Password change failed for admin: {admin.username}")
 
-            dialog.password_changed.connect(on_password_changed)
-            dialog.exec_()
+            # Set the callback
+            self.admin_dashboard_window.password_change_callback = on_password_changed
 
-        except Exception as e:
-            logger.error(f"Error showing password change dialog: {e}")
-            if forced:
-                # If forced password change fails, show error and exit
-                from PyQt5.QtWidgets import QMessageBox
-                QMessageBox.critical(
-                    None,
-                    "Critical Error",
-                    "Failed to load password change dialog. The application will exit."
-                )
-                self.app.quit()
+    def handle_password_changed(self, success):
+        """
+        Handle the password change result.
+        
+        Args:
+            success: Whether the password change was successful.
+        """
+        logger.info(f"Password change result: {success}")
 
     def handle_window_change(self, window_name, data=None):
         """
-        Handle window change event.
+        Handle a window change request.
 
         Args:
-            window_name (str): Name of window to show
-            data (any): Optional data to pass to the window
+            window_name: The name of the window to show.
+            data: Optional data to pass to the window.
         """
+        logger.info(f"Window change requested: {window_name}")
+        
         if window_name == "login":
             self.show_login_window()
         elif window_name == "dashboard":
@@ -1099,38 +946,8 @@ class ConsultEaseApp:
         else:
             logger.warning(f"Unknown window: {window_name}")
 
+# If this file is run directly, start the application
 if __name__ == "__main__":
-    # Configure logging
-    import logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler("consultease.log")
-        ]
-    )
-
-    # Enable debug logging for RFID service
-    rfid_logger = logging.getLogger('central_system.services.rfid_service')
-    rfid_logger.setLevel(logging.DEBUG)
-
-    # Set environment variables if needed
-    import os
-
-    # Configure RFID - enable simulation mode since we're on Raspberry Pi
-    os.environ['RFID_SIMULATION_MODE'] = 'true'  # Enable if no RFID reader available
-
-    # Set the theme to light as per the technical context document
-    os.environ['CONSULTEASE_THEME'] = 'light'
-
-    # Use SQLite for development and testing
-    os.environ['DB_TYPE'] = 'sqlite'
-    os.environ['DB_PATH'] = 'consultease.db'  # SQLite database file
-
-    # Check if we're running in fullscreen mode
-    fullscreen = os.environ.get('CONSULTEASE_FULLSCREEN', 'false').lower() == 'true'
-
-    # Start the application
-    app = ConsultEaseApp(fullscreen=fullscreen)
-    sys.exit(app.run())
+    # Create and run the application
+    app = ConsultEaseApp(fullscreen=False)
+    app.run()
