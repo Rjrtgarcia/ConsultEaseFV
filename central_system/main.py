@@ -140,7 +140,7 @@ class ConsultEaseApp:
         # Start controllers
         logger.info("Starting RFID controller")
         self.rfid_controller.start()
-        self.rfid_controller.register_callback(self.handle_rfid_scan)
+        self.rfid_controller.register_callback(self.handle_rfid_read)
 
         logger.info("Starting faculty controller")
         self.faculty_controller.start()
@@ -495,7 +495,7 @@ class ConsultEaseApp:
             logger.info("Created login window")
         
         # Connect the RFID controller to the login window
-        self.rfid_controller.register_callback(self.login_window.handle_rfid_scan)
+        self.rfid_controller.register_callback(self.login_window.handle_rfid_read)
 
         # Get current active window
         active_window = None
@@ -698,7 +698,7 @@ class ConsultEaseApp:
         
         logger.info("Admin dashboard window shown")
 
-    def handle_rfid_scan(self, student, rfid_uid):
+    def handle_rfid_read(self, student, rfid_uid):
         """
         Handle an RFID scan event.
 
