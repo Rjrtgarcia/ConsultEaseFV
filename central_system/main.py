@@ -117,20 +117,6 @@ class ConsultEaseApp:
         self.admin_controller = AdminController()
         self.faculty_response_controller = FacultyResponseController()
 
-        # Determine if it's a first-time setup scenario
-        if self.admin_controller.is_first_time_setup():
-            logger.info("First-time setup detected. Admin account creation will be handled by the AdminLoginWindow.")
-            # In first-time setup, neither ensure_default_admin nor _verify_admin_account_startup should run,
-            # as they might preemptively create an 'admin' account.
-        else:
-            # Not a first-time setup (admin accounts exist or an error occurred assuming they exist)
-            logger.info("Existing admin accounts found or expected. Ensuring default admin and verifying.")
-            self.admin_controller.ensure_default_admin() # This method also checks if admin_count == 0.
-                                                         # If is_first_time_setup() was false, admin_count > 0,
-                                                         # so ensure_default_admin will likely not create an account here,
-                                                         # unless the specific 'admin' user is missing.
-            self._verify_admin_account_startup()     # Verifies/repairs the 'admin' account.
-
         # Initialize windows
         self.login_window = None
         self.dashboard_window = None
@@ -655,12 +641,6 @@ class ConsultEaseApp:
             self.admin_login_window.show()
             if self.fullscreen:
                 self.admin_login_window.showFullScreen()
-        
-        # Check if this is a first-time setup
-        is_first_time = self.admin_controller.is_first_time_setup()
-        if is_first_time:
-            logger.info("This is a first-time setup, showing admin creation dialog")
-            self.admin_login_window.show_first_time_setup_dialog()
         
         logger.info("Admin login window shown")
 

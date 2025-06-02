@@ -461,7 +461,17 @@ class AdminAccountCreationDialog(QDialog):
                 # Emit success signal with admin info
                 admin_info = result.get('admin')
                 if not admin_info:
-                     admin_info = {'username': username} # Fallback if admin key is missing
+                    admin_info = {'username': username} # Fallback if admin key is missing
+                else:
+                    # Ensure we have username field - it might be an object
+                    if hasattr(admin_info, 'username'):
+                        admin_info = {'username': admin_info.username, 'id': getattr(admin_info, 'id', None)}
+                    elif isinstance(admin_info, dict) and 'username' in admin_info:
+                        # Already in correct format
+                        pass
+                    else:
+                        # Fallback
+                        admin_info = {'username': username}
 
                 # Show success message
                 QTimer.singleShot(1000, lambda: self.show_success_and_close(admin_info))
@@ -481,6 +491,9 @@ class AdminAccountCreationDialog(QDialog):
             f"Admin account '{admin_info['username']}' created successfully!\n\n"
             "You will now be logged into the admin dashboard."
         )
+
+        # Add the password to admin_info for auto-login
+        admin_info['password'] = self.password_input.text()
 
         # Emit the account created signal
         self.account_created.emit(admin_info)
