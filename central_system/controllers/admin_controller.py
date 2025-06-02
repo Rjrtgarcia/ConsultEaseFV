@@ -207,13 +207,15 @@ class AdminController:
                 'error': f'Failed to create account: {str(e)}'
             }
 
-    def create_admin(self, username, password):
+    def create_admin(self, username, password, email=None, force_change_password=False):
         """
         Create a new admin user with password validation.
 
         Args:
             username (str): Admin username
             password (str): Admin password
+            email (str, optional): Admin email address
+            force_change_password (bool): Whether to force password change on first login
 
         Returns:
             tuple: (Admin object or None, list of validation errors)
@@ -242,7 +244,9 @@ class AdminController:
                 username=username,
                 password_hash=password_hash,
                 salt=salt,
-                is_active=True
+                email=email,
+                is_active=True,
+                force_change_password=force_change_password
             )
 
             db.add(admin)
@@ -538,3 +542,38 @@ class AdminController:
         except Exception as e:
             logger.error(f"Error hashing password: {e}")
             return None
+
+    def get_student_by_id(self, student_id):
+        """
+        Get a student by ID.
+
+        Args:
+            student_id (int): The student ID to look up
+
+        Returns:
+            Student: The student object if found, None otherwise
+        """
+        try:
+            from ..models import Student
+            db = get_db()
+            student = db.query(Student).filter(Student.id == student_id).first()
+            return student
+        except Exception as e:
+            logger.error(f"Error getting student by ID {student_id}: {e}")
+            return None
+
+    def get_all_students(self):
+        """
+        Get all students.
+
+        Returns:
+            list: List of Student objects
+        """
+        try:
+            from ..models import Student
+            db = get_db()
+            students = db.query(Student).all()
+            return students
+        except Exception as e:
+            logger.error(f"Error getting all students: {e}")
+            return []

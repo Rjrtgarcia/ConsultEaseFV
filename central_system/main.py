@@ -660,7 +660,7 @@ class ConsultEaseApp:
         is_first_time = self.admin_controller.is_first_time_setup()
         if is_first_time:
             logger.info("This is a first-time setup, showing admin creation dialog")
-            self.admin_login_window.show_first_time_setup()
+            self.admin_login_window.show_first_time_setup_dialog()
         
         logger.info("Admin login window shown")
 
