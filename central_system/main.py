@@ -506,8 +506,9 @@ class ConsultEaseApp:
             self.login_window = LoginWindow()
             # Set the fullscreen property
             self.login_window.fullscreen = self.fullscreen
-            # Connect the window change signal to our handler
+            # Connect signals
             self.login_window.change_window.connect(self.handle_window_change)
+            self.login_window.student_authenticated.connect(self.handle_student_authenticated)
             logger.info("Created login window")
         
         # Connect the RFID controller to the login window

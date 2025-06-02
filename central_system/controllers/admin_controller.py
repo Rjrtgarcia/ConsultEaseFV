@@ -486,3 +486,55 @@ class AdminController:
         except Exception as e:
             logger.error(f"Error ensuring default admin: {str(e)}")
             return False
+
+    def authenticate_admin(self, username, password):
+        """
+        Authenticate an admin user and return the Admin object directly.
+        This is a wrapper around the authenticate method for cleaner use in main.py.
+
+        Args:
+            username (str): Admin username
+            password (str): Admin password
+
+        Returns:
+            Admin: The authenticated admin object or None if authentication fails
+        """
+        result = self.authenticate(username, password)
+        if result and 'admin' in result:
+            return result['admin']
+        return None
+
+    def get_admin_by_username(self, username):
+        """
+        Get an admin by username.
+
+        Args:
+            username (str): The username to look up
+
+        Returns:
+            Admin: The admin object if found, None otherwise
+        """
+        try:
+            db = get_db()
+            admin = db.query(Admin).filter(Admin.username == username).first()
+            return admin
+        except Exception as e:
+            logger.error(f"Error getting admin by username {username}: {e}")
+            return None
+
+    def hash_password(self, password):
+        """
+        Hash a password using the Admin model's hash_password method.
+        
+        Args:
+            password (str): The password to hash
+            
+        Returns:
+            str: The hashed password
+        """
+        try:
+            password_hash, salt = Admin.hash_password(password)
+            return password_hash
+        except Exception as e:
+            logger.error(f"Error hashing password: {e}")
+            return None
