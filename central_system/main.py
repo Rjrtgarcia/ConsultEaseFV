@@ -455,6 +455,20 @@ class ConsultEaseApp:
         Run the application.
         """
         logger.info("Starting ConsultEase application")
+        
+        # Set fullscreen mode for all windows if enabled
+        if self.fullscreen:
+            logger.info("Fullscreen mode enabled")
+            
+            # Apply Qt fullscreen flags
+            from PyQt5.QtCore import Qt
+            self.app.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+            
+            # Set environment variable for QT_SCALE_FACTOR if needed
+            if "QT_SCALE_FACTOR" not in os.environ:
+                os.environ["QT_SCALE_FACTOR"] = "1.0"
+        
+        # Show the login window and enter the event loop
         self.show_login_window()
         sys.exit(self.app.exec_())
 
@@ -490,6 +504,8 @@ class ConsultEaseApp:
         # Create the login window if it doesn't exist
         if not self.login_window:
             self.login_window = LoginWindow()
+            # Set the fullscreen property
+            self.login_window.fullscreen = self.fullscreen
             # Connect the window change signal to our handler
             self.login_window.change_window.connect(self.handle_window_change)
             logger.info("Created login window")
@@ -547,6 +563,8 @@ class ConsultEaseApp:
                 self.handle_consultation_request,
                 self.faculty_controller
             )
+            # Set the fullscreen property
+            self.dashboard_window.fullscreen = self.fullscreen
             logger.info("Created dashboard window")
         
         # Update the dashboard with student data
@@ -600,10 +618,14 @@ class ConsultEaseApp:
         
         # Create the admin login window if it doesn't exist
         if not self.admin_login_window:
-            self.admin_login_window = AdminLoginWindow(
-                self.handle_window_change,
-                self.handle_admin_authenticated
-            )
+            self.admin_login_window = AdminLoginWindow()
+            # Set the fullscreen property
+            self.admin_login_window.fullscreen = self.fullscreen
+            # Connect signals after initialization
+            self.admin_login_window.change_window.connect(self.handle_window_change)
+            self.admin_login_window.admin_authenticated.connect(self.handle_admin_authenticated)
+            # Set the admin controller
+            self.admin_login_window.set_admin_controller(self.admin_controller)
             logger.info("Created admin login window")
         
         # Get current active window
@@ -658,6 +680,8 @@ class ConsultEaseApp:
                 self.consultation_controller,
                 self.admin_controller
             )
+            # Set the fullscreen property
+            self.admin_dashboard_window.fullscreen = self.fullscreen
             logger.info("Created admin dashboard window")
         
         # Update the admin dashboard with admin data
@@ -740,15 +764,24 @@ class ConsultEaseApp:
         Handle an admin authentication event.
 
         Args:
-            credentials: The admin credentials.
+            credentials: The admin credentials as a tuple (username, password).
         """
-        logger.info(f"Admin authentication attempt: {credentials['username']}")
+        # Extract credentials from tuple
+        if isinstance(credentials, tuple) and len(credentials) == 2:
+            username, password = credentials
+        else:
+            logger.error(f"Invalid credential format received: {type(credentials)}")
+            if self.admin_login_window:
+                self.admin_login_window.show_login_error("Authentication error: Invalid credentials format")
+            return False, "Invalid credentials format"
+            
+        logger.info(f"Admin authentication attempt: {username}")
         
         try:
             # Authenticate the admin
             admin = self.admin_controller.authenticate_admin(
-                credentials['username'],
-                credentials['password']
+                username,
+                password
             )
 
             if admin:
@@ -763,10 +796,14 @@ class ConsultEaseApp:
                 # Return success
                 return True, "Authentication successful"
             else:
-                logger.warning(f"Admin authentication failed: {credentials['username']}")
+                logger.warning(f"Admin authentication failed: {username}")
+                if self.admin_login_window:
+                    self.admin_login_window.show_login_error("Invalid username or password")
                 return False, "Invalid username or password"
         except Exception as e:
             logger.error(f"Admin authentication error: {str(e)}")
+            if self.admin_login_window:
+                self.admin_login_window.show_login_error(f"Authentication error: {str(e)}")
             return False, f"Authentication error: {str(e)}"
 
     def handle_consultation_request(self, faculty, message, course_code):
@@ -950,6 +987,6 @@ class ConsultEaseApp:
 
 # If this file is run directly, start the application
 if __name__ == "__main__":
-    # Create and run the application
-    app = ConsultEaseApp(fullscreen=False)
+    # Create and run the application with fullscreen mode enabled
+    app = ConsultEaseApp(fullscreen=True)
     app.run()

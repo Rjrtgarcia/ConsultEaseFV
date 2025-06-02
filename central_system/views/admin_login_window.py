@@ -403,8 +403,23 @@ class AdminLoginWindow(BaseWindow):
                 self.admin_controller.check_admin_accounts_exist(force_refresh=True)
 
             # Automatically authenticate the newly created admin
-            # Emit the authentication signal to proceed to dashboard
-            self.admin_authenticated.emit((admin_info['username'], None))  # Password not needed for auto-login
+            # Instead of using None for password, use the password from admin_info
+            # or skip auto-login and just show a success message
+            if 'password' in admin_info and admin_info['password']:
+                # Emit the authentication signal to proceed to dashboard with actual password
+                self.admin_authenticated.emit((admin_info['username'], admin_info['password']))
+            else:
+                # Show success message and let user login manually
+                QMessageBox.information(
+                    self,
+                    "Account Created",
+                    f"Admin account '{admin_info['username']}' was created successfully.\n\n"
+                    "Please login with your credentials."
+                )
+                # Clear and focus username field
+                self.username_input.setText(admin_info['username'])
+                self.password_input.clear()
+                self.password_input.setFocus()
 
         except Exception as e:
             logger.error(f"Error handling account creation: {e}")
