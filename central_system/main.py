@@ -533,7 +533,7 @@ class ConsultEaseApp:
 
         # Apply transition if there's an active window
         if active_window:
-            self.transition_manager.transition(active_window, self.login_window)
+            self.transition_manager.fade_out_in(active_window, self.login_window)
         else:
             # Just show the login window
             self.login_window.show()
@@ -599,7 +599,7 @@ class ConsultEaseApp:
 
         # Apply transition if there's an active window
         if active_window:
-            self.transition_manager.transition(active_window, self.dashboard_window)
+            self.transition_manager.fade_out_in(active_window, self.dashboard_window)
         else:
             # Just show the dashboard window
             self.dashboard_window.show()
@@ -649,7 +649,7 @@ class ConsultEaseApp:
         # Apply transition if there's an active window
         if active_window:
             # Use the transition manager
-            self.transition_manager.transition(active_window, self.admin_login_window)
+            self.transition_manager.fade_out_in(active_window, self.admin_login_window)
         else:
             # Just show the admin login window
             self.admin_login_window.show()
@@ -714,7 +714,7 @@ class ConsultEaseApp:
 
         # Apply transition if there's an active window
         if active_window:
-            self.transition_manager.transition(active_window, self.admin_dashboard_window)
+            self.transition_manager.fade_out_in(active_window, self.admin_dashboard_window)
         else:
             # Just show the admin dashboard window
             self.admin_dashboard_window.show()

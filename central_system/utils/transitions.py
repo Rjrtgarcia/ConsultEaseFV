@@ -191,6 +191,40 @@ class WindowTransitionManager:
             next_window (QWidget): The window to transition to
             on_finished (callable, optional): Callback to execute when transition completes
         """
+        # Validate input parameters
+        if current_window is None:
+            logger.error("Current window is None in fade_out_in")
+            if next_window:
+                next_window.show()
+                next_window.raise_()
+                if on_finished:
+                    on_finished()
+            return
+            
+        if next_window is None:
+            logger.error("Next window is None in fade_out_in")
+            return
+            
+        # Check if windows are valid QWidget objects
+        if not isinstance(current_window, QWidget) or not isinstance(next_window, QWidget):
+            logger.error(f"Invalid window objects: current={type(current_window)}, next={type(next_window)}")
+            if isinstance(next_window, QWidget):
+                next_window.show()
+                next_window.raise_()
+                if on_finished:
+                    on_finished()
+            return
+            
+        # Check if windows are still valid (not destroyed)
+        try:
+            current_visible = current_window.isVisible()
+            next_exists = next_window.objectName() is not None  # Simple test to see if object is valid
+        except RuntimeError as e:
+            logger.error(f"Window access error, likely destroyed: {e}")
+            if on_finished:
+                on_finished()
+            return
+            
         logger.info(f"Starting transition from {current_window.__class__.__name__} to {next_window.__class__.__name__}")
 
         self.current_window = current_window
