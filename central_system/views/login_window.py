@@ -198,7 +198,7 @@ class LoginWindow(BaseWindow):
         self.start_rfid_scanning()
 
         # Focus the RFID input field
-            self.rfid_input.setFocus()
+        self.rfid_input.setFocus()
 
     def resizeEvent(self, event):
         """Handle window resize"""
