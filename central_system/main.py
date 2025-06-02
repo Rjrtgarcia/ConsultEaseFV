@@ -489,7 +489,9 @@ class ConsultEaseApp:
         
         # Create the login window if it doesn't exist
         if not self.login_window:
-            self.login_window = LoginWindow(self.handle_window_change)
+            self.login_window = LoginWindow()
+            # Connect the window change signal to our handler
+            self.login_window.change_window.connect(self.handle_window_change)
             logger.info("Created login window")
         
         # Connect the RFID controller to the login window
