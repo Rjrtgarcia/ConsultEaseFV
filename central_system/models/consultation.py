@@ -10,10 +10,8 @@ class ConsultationStatus(enum.Enum):
     """
     PENDING = "pending"
     ACCEPTED = "accepted"
-    DECLINED = "declined"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
-    TIMEOUT = "timeout"
 
 class Consultation(Base):
     """
@@ -30,9 +28,7 @@ class Consultation(Base):
     status = Column(Enum(ConsultationStatus), default=ConsultationStatus.PENDING)
     requested_at = Column(DateTime, default=func.now())
     accepted_at = Column(DateTime, nullable=True)
-    declined_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
-    response_message = Column(String, nullable=True)
 
     # Relationships
     student = relationship("Student", backref="consultations")
@@ -54,7 +50,5 @@ class Consultation(Base):
             "status": self.status.value,
             "requested_at": self.requested_at.isoformat() if self.requested_at else None,
             "accepted_at": self.accepted_at.isoformat() if self.accepted_at else None,
-            "declined_at": self.declined_at.isoformat() if self.declined_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-            "response_message": self.response_message
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None
         } 

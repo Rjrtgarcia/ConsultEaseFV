@@ -47,26 +47,6 @@ unsigned long messageDisplayStart = 0;
 String lastReceivedMessage = "";
 String g_receivedConsultationId = "";
 
-// Consultation request variables
-struct ConsultationRequest {
-  String id;
-  String studentName;
-  String studentId;
-  String message;
-  String courseCode;
-  unsigned long receivedTime;
-  bool displayed;
-  bool responded;
-  bool urgent;
-};
-
-// Queue for consultation requests
-ConsultationRequest consultationQueue[CONSULTATION_MAX_QUEUE];
-int consultationQueueCount = 0;
-bool consultationDisplayActive = false;
-unsigned long lastConsultationFlash = 0;
-bool consultationFlashState = false;
-
 // Global variables
 unsigned long lastHeartbeat = 0;
 unsigned long lastMqttReconnect = 0;
@@ -219,388 +199,60 @@ bool isFacultyBeacon(BLEAdvertisedDevice& device) {
 }
 
 // ================================
-// CONSULTATION HANDLING
-// ================================
-
-void addConsultationRequest(String consultId, String studentName, String studentId, String message, String courseCode = "") {
-  if (consultationQueueCount >= CONSULTATION_MAX_QUEUE) {
-    // If queue is full, shift all items and drop oldest
-    for (int i = 0; i < CONSULTATION_MAX_QUEUE - 1; i++) {
-      consultationQueue[i] = consultationQueue[i + 1];
-    }
-    consultationQueueCount = CONSULTATION_MAX_QUEUE - 1;
-  }
-
-  // Add new consultation to queue
-  ConsultationRequest request;
-  request.id = consultId;
-  request.studentName = studentName;
-  request.studentId = studentId;
-  request.message = message;
-  request.courseCode = courseCode;
-  request.receivedTime = millis();
-  request.displayed = false;
-  request.responded = false;
-  request.urgent = false;
-
-  consultationQueue[consultationQueueCount] = request;
-  consultationQueueCount++;
-
-  // Play notification sound if enabled
-  if (CONSULTATION_SOUND_ENABLED) {
-    // Simple beep pattern for notification
-    for (int i = 0; i < 3; i++) {
-      tone(BUZZER_PIN, 2000, 100);
-      delay(150);
-    }
-  }
-
-  // Update display to show consultation
-  showNextConsultation();
-}
-
-void showNextConsultation() {
-  // If no consultations or already displaying one, don't do anything
-  if (consultationQueueCount == 0 || consultationDisplayActive) {
-    return;
-  }
-
-  // Find first unresponded consultation
-  int index = -1;
-  for (int i = 0; i < consultationQueueCount; i++) {
-    if (!consultationQueue[i].responded) {
-      index = i;
-      break;
-    }
-  }
-
-  if (index >= 0) {
-    // Mark as displayed and start display
-    consultationQueue[index].displayed = true;
-    consultationDisplayActive = true;
-
-    // Draw consultation on display
-    drawConsultationRequest(consultationQueue[index]);
-  }
-}
-
-void drawConsultationRequest(ConsultationRequest &request) {
-  // Save current display state to restore after response
-  tft.fillScreen(TFT_BG);
-
-  // Draw header
-  tft.fillRect(0, 0, tft.width(), 40, NU_DARKBLUE);
-  tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(10, 12);
-  tft.println("CONSULTATION REQUEST");
-
-  // Draw student info
-  tft.setTextColor(NU_GOLD);
-  tft.setTextSize(2);
-  tft.setCursor(10, 50);
-  tft.print("From: ");
-  tft.setTextColor(TFT_WHITE);
-  tft.println(request.studentName);
-
-  // Draw student ID
-  tft.setTextColor(NU_GOLD);
-  tft.setCursor(10, 75);
-  tft.print("ID: ");
-  tft.setTextColor(TFT_WHITE);
-  tft.println(request.studentId);
-
-  // Draw course code if available
-  if (request.courseCode.length() > 0) {
-    tft.setTextColor(NU_GOLD);
-    tft.setCursor(10, 100);
-    tft.print("Course: ");
-    tft.setTextColor(TFT_WHITE);
-    tft.println(request.courseCode);
-  }
-
-  // Draw message (truncate if too long)
-  tft.setTextColor(NU_GOLD);
-  tft.setCursor(10, 125);
-  tft.println("Message:");
-  tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(1);
-  
-  // Wrap message to fit screen
-  String message = request.message;
-  int maxChars = 38; // Characters per line for size 1
-  int y = 145;
-  
-  for (int i = 0; i < message.length(); i += maxChars) {
-    int endIndex = min(i + maxChars, (int)message.length());
-    // Find last space to break line properly
-    if (endIndex < message.length()) {
-      int lastSpace = message.lastIndexOf(' ', endIndex);
-      if (lastSpace > i && lastSpace < endIndex) {
-        endIndex = lastSpace;
-      }
-    }
-    tft.setCursor(10, y);
-    tft.println(message.substring(i, endIndex));
-    y += 15; // Line spacing
-    
-    // Avoid drawing outside the screen
-    if (y > tft.height() - 60) {
-      tft.setCursor(10, y);
-      tft.println("...");
-      break;
-    }
-  }
-
-  // Draw button prompts at bottom
-  tft.fillRect(0, tft.height() - 40, tft.width(), 40, NU_DARKBLUE);
-  tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(2);
-  
-  // Accept button prompt (left)
-  tft.fillCircle(30, tft.height() - 20, 10, TFT_BLACK);
-  tft.fillCircle(30, tft.height() - 20, 8, 0x07E0); // Green
-  tft.setCursor(45, tft.height() - 25);
-  tft.print("Accept");
-  
-  // Decline button prompt (right)
-  tft.fillCircle(tft.width() - 100, tft.height() - 20, 10, TFT_BLACK);
-  tft.fillCircle(tft.width() - 100, tft.height() - 20, 8, 0xF800); // Red
-  tft.setCursor(tft.width() - 85, tft.height() - 25);
-  tft.print("Busy");
-}
-
-void processConsultationResponse(int index, String responseType) {
-  if (index < 0 || index >= consultationQueueCount) {
-    DEBUG_PRINTLN("Invalid consultation index for response");
-    return;
-  }
-
-  ConsultationRequest &request = consultationQueue[index];
-  
-  // Mark as responded
-  request.responded = true;
-  
-  // Prepare response JSON
-  char jsonBuffer[256];
-  sprintf(jsonBuffer, 
-          "{"
-          "\"faculty_id\":%d,"
-          "\"faculty_name\":\"%s\","
-          "\"response_type\":\"%s\","
-          "\"message_id\":\"%s\","
-          "\"timestamp\":%lu"
-          "}",
-          FACULTY_ID,
-          FACULTY_NAME,
-          responseType.c_str(),
-          request.id.c_str(),
-          millis());
-  
-  // Format the response topic
-  char responseTopic[64];
-  sprintf(responseTopic, MQTT_TOPIC_RESPONSES, FACULTY_ID);
-  
-  // Publish the response with QoS 2
-  DEBUG_PRINTF("Publishing %s response for consultation %s\n", responseType.c_str(), request.id.c_str());
-  publishWithQueue(responseTopic, jsonBuffer, true);
-  
-  // Show response confirmation briefly
-  tft.fillScreen(TFT_BG);
-  tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(10, tft.height() / 2 - 20);
-  
-  if (responseType == "ACCEPTED") {
-    tft.fillScreen(0x07E0); // Green background
-    tft.println("Consultation Accepted");
-  } else if (responseType == "DECLINED") {
-    tft.fillScreen(0xF800); // Red background
-    tft.println("Marked as Busy");
-  }
-  
-  // Wait briefly to show confirmation
-  delay(1000);
-  
-  // Reset display flag and update display
-  consultationDisplayActive = false;
-  
-  // Show next consultation if available, otherwise restore normal display
-  bool hasNext = false;
-  for (int i = 0; i < consultationQueueCount; i++) {
-    if (!consultationQueue[i].responded) {
-      hasNext = true;
-      break;
-    }
-  }
-  
-  if (hasNext) {
-    showNextConsultation();
-  } else {
-    updateMainDisplay();
-  }
-}
-
-void handleConsultationTimeout() {
-  // Check for consultation timeout
-  if (consultationDisplayActive && CONSULTATION_AUTO_TIMEOUT) {
-    for (int i = 0; i < consultationQueueCount; i++) {
-      if (consultationQueue[i].displayed && !consultationQueue[i].responded) {
-        unsigned long elapsed = millis() - consultationQueue[i].receivedTime;
-        
-        // If displayed for too long, auto-decline
-        if (elapsed > CONSULTATION_DISPLAY_TIMEOUT) {
-          DEBUG_PRINTF("Consultation %s timed out after %lu ms\n", consultationQueue[i].id.c_str(), elapsed);
-          processConsultationResponse(i, "TIMEOUT");
-          break;
-        }
-        
-        // Flash display to indicate waiting consultation
-        if (millis() - lastConsultationFlash > CONSULTATION_FLASH_INTERVAL) {
-          lastConsultationFlash = millis();
-          consultationFlashState = !consultationFlashState;
-          
-          // Highlight header to indicate pending
-          if (consultationFlashState) {
-            tft.fillRect(0, 0, tft.width(), 40, NU_GOLD);
-            tft.setTextColor(TFT_BLACK);
-          } else {
-            tft.fillRect(0, 0, tft.width(), 40, NU_DARKBLUE);
-            tft.setTextColor(TFT_WHITE);
-          }
-          tft.setTextSize(2);
-          tft.setCursor(10, 12);
-          tft.println("CONSULTATION REQUEST");
-        }
-      }
-    }
-  }
-}
-
-// Parse consultation ID from message
-bool parseConsultationRequest(String message) {
-  // Expected format: "CID:123 From:Student Name (SID:456): Message text"
-  int cidPos = message.indexOf("CID:");
-  int fromPos = message.indexOf("From:");
-  int sidPos = message.indexOf("SID:");
-  int messageStart = message.indexOf(":", sidPos + 4) + 1;
-  
-  if (cidPos == -1 || fromPos == -1 || sidPos == -1 || messageStart == 0) {
-    DEBUG_PRINTLN("Invalid consultation message format");
-    return false;
-  }
-  
-  String consultId = message.substring(cidPos + 4, fromPos - 1).trim();
-  String studentName = message.substring(fromPos + 5, sidPos - 2).trim();
-  String studentId = message.substring(sidPos + 4, message.indexOf(")", sidPos)).trim();
-  String consultMessage = message.substring(messageStart).trim();
-  
-  // Check for course code (optional)
-  String courseCode = "";
-  int coursePos = consultMessage.indexOf("Course:");
-  if (coursePos != -1) {
-    int courseEnd = consultMessage.indexOf("\n", coursePos);
-    if (courseEnd != -1) {
-      courseCode = consultMessage.substring(coursePos + 7, courseEnd).trim();
-      // Remove course code line from message
-      consultMessage = consultMessage.substring(0, coursePos) + consultMessage.substring(courseEnd + 1);
-    }
-  }
-  
-  DEBUG_PRINTF("Parsed consultation: ID=%s, Student=%s (SID=%s), Course=%s\n", 
-              consultId.c_str(), studentName.c_str(), studentId.c_str(), courseCode.c_str());
-  
-  // Add to consultation queue
-  addConsultationRequest(consultId, studentName, studentId, consultMessage, courseCode);
-  
-  return true;
-}
-
-// ================================
 // BUTTON HANDLING CLASS
 // ================================
 class ButtonHandler {
 private:
-  int pinAccept, pinDecline;
-  bool lastStateAccept, lastStateDecline;
-  unsigned long lastDebounceAccept, lastDebounceDecline;
+  int pinA, pinB;
+  bool lastStateA, lastStateB;
+  unsigned long lastDebounceA, lastDebounceB;
 
 public:
-  ButtonHandler(int acceptPin, int declinePin) {
-    pinAccept = acceptPin;
-    pinDecline = declinePin;
-    lastStateAccept = HIGH;
-    lastStateDecline = HIGH;
-    lastDebounceAccept = 0;
-    lastDebounceDecline = 0;
+  ButtonHandler(int buttonAPin, int buttonBPin) {
+    pinA = buttonAPin;
+    pinB = buttonBPin;
+    lastStateA = HIGH;
+    lastStateB = HIGH;
+    lastDebounceA = 0;
+    lastDebounceB = 0;
   }
 
   void init() {
-    pinMode(pinAccept, INPUT_PULLUP);
-    pinMode(pinDecline, INPUT_PULLUP);
+    pinMode(pinA, INPUT_PULLUP);
+    pinMode(pinB, INPUT_PULLUP);
     DEBUG_PRINTLN("Buttons initialized:");
-    DEBUG_PRINTF("  Button Accept: Pin %d\n", pinAccept);
-    DEBUG_PRINTF("  Button Decline: Pin %d\n", pinDecline);
+    DEBUG_PRINTF("  Button A (Blue/Acknowledge): Pin %d\n", pinA);
+    DEBUG_PRINTF("  Button B (Red/Busy): Pin %d\n", pinB);
   }
 
   void update() {
-    // Accept button handling
-    bool readingAccept = digitalRead(pinAccept);
-    if (readingAccept != lastStateAccept) {
-      lastDebounceAccept = millis();
+    // Button A (Acknowledge) handling
+    bool readingA = digitalRead(pinA);
+    if (readingA != lastStateA) {
+      lastDebounceA = millis();
     }
 
-    if ((millis() - lastDebounceAccept) > BUTTON_DEBOUNCE_DELAY) {
-      if (readingAccept == LOW && lastStateAccept == HIGH) {
+    if ((millis() - lastDebounceA) > BUTTON_DEBOUNCE_DELAY) {
+      if (readingA == LOW && lastStateA == HIGH) {
         buttonAPressed = true;
-        DEBUG_PRINTLN("🟢 ACCEPT BUTTON PRESSED");
-        handleAcceptButton();
+        DEBUG_PRINTLN("🔵 BUTTON A (ACKNOWLEDGE) PRESSED");
       }
     }
-    lastStateAccept = readingAccept;
+    lastStateA = readingA;
 
-    // Decline button handling
-    bool readingDecline = digitalRead(pinDecline);
-    if (readingDecline != lastStateDecline) {
-      lastDebounceDecline = millis();
+    // Button B (Busy) handling
+    bool readingB = digitalRead(pinB);
+    if (readingB != lastStateB) {
+      lastDebounceB = millis();
     }
 
-    if ((millis() - lastDebounceDecline) > BUTTON_DEBOUNCE_DELAY) {
-      if (readingDecline == LOW && lastStateDecline == HIGH) {
+    if ((millis() - lastDebounceB) > BUTTON_DEBOUNCE_DELAY) {
+      if (readingB == LOW && lastStateB == HIGH) {
         buttonBPressed = true;
-        DEBUG_PRINTLN("🔴 DECLINE BUTTON PRESSED");
-        handleDeclineButton();
+        DEBUG_PRINTLN("🔴 BUTTON B (BUSY) PRESSED");
       }
     }
-    lastStateDecline = readingDecline;
-  }
-
-  void handleAcceptButton() {
-    // If consultation is displayed, accept it
-    if (consultationDisplayActive) {
-      for (int i = 0; i < consultationQueueCount; i++) {
-        if (consultationQueue[i].displayed && !consultationQueue[i].responded) {
-          processConsultationResponse(i, "ACCEPTED");
-          return;
-        }
-      }
-    }
-    // If no consultation is displayed, check if there are any pending ones
-    else if (consultationQueueCount > 0) {
-      showNextConsultation();
-    }
-  }
-
-  void handleDeclineButton() {
-    // If consultation is displayed, decline it
-    if (consultationDisplayActive) {
-      for (int i = 0; i < consultationQueueCount; i++) {
-        if (consultationQueue[i].displayed && !consultationQueue[i].responded) {
-          processConsultationResponse(i, "DECLINED");
-          return;
-        }
-      }
-    }
+    lastStateB = readingB;
   }
 
   bool isButtonAPressed() {
@@ -1473,56 +1125,54 @@ void connectMQTT() {
 }
 
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-  // Convert payload to string
-  payload[length] = '\0';
-  String message = String((char*)payload);
-  
-  DEBUG_PRINTF("MQTT message received: %s\n", topic);
-
-  // Format topics for comparison
-  char statusTopic[64];
-  sprintf(statusTopic, MQTT_TOPIC_STATUS, FACULTY_ID);
-
-  char messagesTopic[64];
-  sprintf(messagesTopic, MQTT_TOPIC_MESSAGES, FACULTY_ID);
-
-  char requestsTopic[64];
-  sprintf(requestsTopic, MQTT_TOPIC_REQUESTS, FACULTY_ID);
-
-  // Handle faculty-specific messages (consultation requests)
-  if (strcmp(topic, messagesTopic) == 0) {
-    DEBUG_PRINTF("Faculty message received: %s\n", message.c_str());
-    lastReceivedMessage = message;
-    messageDisplayed = false;
-    messageDisplayStart = millis();
-    
-    // Parse and handle consultation request
-    parseConsultationRequest(message);
+  // Bounds checking for security
+  if (length > MAX_MESSAGE_LENGTH) {
+    DEBUG_PRINTF("⚠️ Message too long (%d bytes), truncating to %d\n", length, MAX_MESSAGE_LENGTH);
+    length = MAX_MESSAGE_LENGTH;
   }
-  // Handle detailed JSON requests
-  else if (strcmp(topic, requestsTopic) == 0) {
-    DEBUG_PRINTF("Consultation request received: %s\n", message.c_str());
-    
-    // Parse JSON consultation request
-    StaticJsonDocument<512> doc;
-    DeserializationError error = deserializeJson(doc, message);
-    
-    if (!error) {
-      // Extract consultation details
-      String consultId = doc["id"].as<String>();
-      String studentName = doc["student_name"].as<String>();
-      String studentId = doc["student_id"].as<String>();
-      String requestMessage = doc["request_message"].as<String>();
-      String courseCode = doc["course_code"].as<String>();
-      
-      // Add to consultation queue
-      addConsultationRequest(consultId, studentName, studentId, requestMessage, courseCode);
+
+  String messageContent = "";
+  messageContent.reserve(length + 1);  // Pre-allocate memory
+
+  for (unsigned int i = 0; i < length; i++) {
+    messageContent += (char)payload[i];
+  }
+
+  DEBUG_PRINTF("📨 Message received (%d bytes): %s\n", length, messageContent.c_str());
+
+  // Parse Consultation ID (CID) from the message
+  // Expected format: "CID:{consultation_id} From:{student_name} (SID:{student_id}): {message}"
+  int cidStartIndex = messageContent.indexOf("CID:");
+  int cidEndIndex = -1;
+  String parsedConsultationId = "";
+
+  if (cidStartIndex != -1) {
+    cidStartIndex += 4; // Length of "CID:"
+    cidEndIndex = messageContent.indexOf(" ", cidStartIndex); // Assume CID ends before the next space
+    if (cidEndIndex != -1) {
+      parsedConsultationId = messageContent.substring(cidStartIndex, cidEndIndex);
     } else {
-      DEBUG_PRINTF("JSON parsing failed: %s\n", error.c_str());
+      // If no space, maybe it's at the end of a short message part (less likely for full message)
+      // Or handle if the format guarantees CID is followed by a specific delimiter or is the first part.
+      // For now, this basic parsing assumes a space after CID.
+      // A more robust parser might be needed if message format varies greatly.
+      parsedConsultationId = messageContent.substring(cidStartIndex); // Fallback: take rest of string (less safe)
     }
+    g_receivedConsultationId = parsedConsultationId;
+    DEBUG_PRINTF("🔑 Parsed Consultation ID (CID): %s\n", g_receivedConsultationId.c_str());
+  } else {
+    g_receivedConsultationId = ""; // Clear if not found, or handle error
+    DEBUG_PRINTLN("⚠️ Consultation ID (CID:) not found in message.");
+    // If CID is mandatory for further processing, might want to ignore message or send error.
+    // For now, we'll proceed, but responses might fail to link in central system if CID is missing.
   }
   
-  // ... rest of callback handling ...
+  if (presenceDetector.getPresence()) {
+    lastReceivedMessage = messageContent; // Store the full message for display
+    displayIncomingMessage(messageContent); // Display the full message
+  } else {
+    DEBUG_PRINTLN("📭 Message ignored - Professor is AWAY");
+  }
 }
 
 void publishPresenceUpdate() {
@@ -1956,9 +1606,6 @@ void loop() {
     }
     lastIndicatorUpdate = millis();
   }
-
-  // Handle consultation timeouts and display flashing
-  handleConsultationTimeout();
 
   delay(100);
 }

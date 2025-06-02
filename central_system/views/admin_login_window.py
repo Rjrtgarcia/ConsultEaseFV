@@ -19,8 +19,7 @@ class AdminLoginWindow(BaseWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.admin_controller = None
-        self.first_time_check_done = False  # Flag to prevent duplicate checks
+        self.admin_controller = None  # Will be set by main application
         self.init_ui()
 
     def set_admin_controller(self, admin_controller):
@@ -313,11 +312,6 @@ class AdminLoginWindow(BaseWindow):
         Check if this is a first-time setup and show account creation dialog if needed.
         """
         try:
-            # Prevent duplicate execution
-            if self.first_time_check_done:
-                logger.info("🔄 First-time setup check already done, skipping")
-                return
-                
             logger.info("🔍 Checking for first-time setup...")
 
             if not self.admin_controller:
@@ -335,14 +329,9 @@ class AdminLoginWindow(BaseWindow):
             if is_first_time:
                 logger.info("✅ First-time setup detected - no admin accounts found")
                 logger.info("🎭 Showing first-time setup dialog...")
-                # Hide keyboard before showing dialog
-                self._hide_keyboard()
                 self.show_first_time_setup_dialog()
             else:
                 logger.info("📋 Admin accounts exist - first-time setup not needed")
-                
-            # Mark as done to prevent duplicate execution
-            self.first_time_check_done = True
 
         except Exception as e:
             logger.error(f"❌ Error checking first-time setup: {e}")
@@ -399,46 +388,6 @@ class AdminLoginWindow(BaseWindow):
                 "Please try logging in manually or restart the application."
             )
 
-    def _hide_keyboard(self):
-        """
-        Hide the onscreen keyboard.
-        """
-        try:
-            logger.info("🔇 Hiding onscreen keyboard...")
-            
-            # Try to get the keyboard handler from the main application
-            keyboard_handler = None
-            try:
-                from PyQt5.QtWidgets import QApplication
-                main_app = QApplication.instance()
-                if hasattr(main_app, 'keyboard_handler'):
-                    keyboard_handler = main_app.keyboard_handler
-                    logger.info("Found keyboard handler in main application")
-            except Exception as e:
-                logger.error(f"Error getting keyboard handler: {str(e)}")
-
-            if keyboard_handler:
-                logger.info("Using keyboard handler to hide keyboard")
-                keyboard_handler.hide_keyboard()
-            else:
-                # Fallback to direct DBus call
-                logger.info("No keyboard handler found, using direct DBus call to hide keyboard")
-                try:
-                    import subprocess
-                    import sys
-                    if sys.platform.startswith('linux'):
-                        # Try to use dbus-send to hide the keyboard
-                        cmd = [
-                            "dbus-send", "--type=method_call", "--dest=sm.puri.OSK0",
-                            "/sm/puri/OSK0", "sm.puri.OSK0.SetVisible", "boolean:false"
-                        ]
-                        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        logger.info("Sent dbus command to hide squeekboard")
-                except Exception as e:
-                    logger.error(f"Error hiding keyboard: {str(e)}")
-        except Exception as e:
-            logger.error(f"Error in _hide_keyboard: {e}")
-
     def handle_account_created(self, admin_info):
         """
         Handle successful account creation from the first-time setup dialog.
@@ -449,37 +398,16 @@ class AdminLoginWindow(BaseWindow):
         try:
             logger.info(f"Admin account created successfully: {admin_info['username']}")
 
-            # Hide keyboard after dialog completion
-            self._hide_keyboard()
-
             # Refresh the admin controller cache
             if self.admin_controller:
                 self.admin_controller.check_admin_accounts_exist(force_refresh=True)
 
             # Automatically authenticate the newly created admin
-            if 'password' in admin_info and admin_info['password']:
-                logger.info("🚀 Auto-authenticating newly created admin...")
-                # Emit the authentication signal to proceed to dashboard with actual password
-                self.admin_authenticated.emit((admin_info['username'], admin_info['password']))
-                logger.info("✅ Admin authentication signal emitted")
-            else:
-                logger.warning("⚠️ No password found in admin_info, showing manual login message")
-                # Show success message and let user login manually
-                from PyQt5.QtWidgets import QMessageBox
-                QMessageBox.information(
-                    self,
-                    "Account Created",
-                    f"Admin account '{admin_info['username']}' was created successfully.\n\n"
-                    "Please login with your credentials."
-                )
-                # Clear and focus username field
-                self.username_input.setText(admin_info['username'])
-                self.password_input.clear()
-                self.password_input.setFocus()
+            # Emit the authentication signal to proceed to dashboard
+            self.admin_authenticated.emit((admin_info['username'], None))  # Password not needed for auto-login
 
         except Exception as e:
             logger.error(f"Error handling account creation: {e}")
-            from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(
                 self,
                 "Login Error",

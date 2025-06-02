@@ -122,18 +122,7 @@ class ConsultationRequestForm(QFrame):
         cancel_button.setStyleSheet('''
             QPushButton {
                 background-color: #f44336;
-                min-width: 140px;
-                min-height: 45px;
-                font-size: 14px;
-                font-weight: bold;
-                border-radius: 5px;
-                padding: 8px;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-            QPushButton:pressed {
-                background-color: #b71c1c;
+                min-width: 120px;
             }
         ''')
         cancel_button.clicked.connect(self.cancel_request)
@@ -142,18 +131,7 @@ class ConsultationRequestForm(QFrame):
         submit_button.setStyleSheet('''
             QPushButton {
                 background-color: #4caf50;
-                min-width: 140px;
-                min-height: 45px;
-                font-size: 14px;
-                font-weight: bold;
-                border-radius: 5px;
-                padding: 8px;
-            }
-            QPushButton:hover {
-                background-color: #388e3c;
-            }
-            QPushButton:pressed {
-                background-color: #2e7d32;
+                min-width: 120px;
             }
         ''')
         submit_button.clicked.connect(self.submit_request)
@@ -324,23 +302,23 @@ class DashboardWindow(BaseWindow):
         """)
         header_layout.addWidget(welcome_label)
 
-        # Logout button - increase size for touch screens
+        # Logout button - smaller size as per user preference
         logout_button = QPushButton("Logout")
-        logout_button.setFixedSize(80, 40)  # Increased from 50x22 to 80x40 for better touch target
+        logout_button.setFixedSize(50, 22)  # Even smaller size
         logout_button.setStyleSheet("""
             QPushButton {
                 background-color: #e74c3c;
-                border-radius: 5px;
                 color: white;
+                border-radius: 3px;
+                font-size: 8pt;  /* Smaller font */
                 font-weight: bold;
-                font-size: 14px;
-                padding: 5px;
+                padding: 1px 2px;
             }
             QPushButton:hover {
                 background-color: #c0392b;
             }
             QPushButton:pressed {
-                background-color: #a93226;
+                background-color: #a82315;
             }
         """)
         logout_button.clicked.connect(self.logout)
@@ -1610,13 +1588,6 @@ class DashboardWindow(BaseWindow):
             subscribe_to_topic("consultease/faculty/+/status_update", self.handle_realtime_status_update)
             subscribe_to_topic(MQTTTopics.SYSTEM_NOTIFICATIONS, self.handle_system_notification)
             
-            # Subscribe to student-specific notifications if student is logged in
-            if self.student:
-                student_id = self.student.id if not isinstance(self.student, dict) else self.student.get('id')
-                if student_id:
-                    student_topic = f"consultease/student/{student_id}/notifications"
-                    subscribe_to_topic(student_topic, self.handle_student_notification)
-            
             logger.info("Real-time faculty status updates enabled")
         except Exception as e:
             logger.error(f"Failed to set up real-time updates: {e}")
@@ -1664,48 +1635,6 @@ class DashboardWindow(BaseWindow):
         except Exception as e:
             logger.error(f"Error handling real-time status update: {e}")
 
-    def handle_student_notification(self, topic, data):
-        """
-        Handle student-specific notifications from MQTT.
-        
-        Args:
-            topic (str): MQTT topic
-            data (dict): Notification data
-        """
-        try:
-            logger.info(f"[MQTT DASHBOARD HANDLER] handle_student_notification - Topic: {topic}, Data: {data}")
-            
-            # Check if this is a consultation response notification
-            if data.get('type') == 'consultation_response':
-                response_type = data.get('response_type', '').upper()
-                faculty_name = data.get('faculty_name', 'Faculty')
-                consultation_id = data.get('consultation_id', 'Unknown')
-                
-                # Show notification to student
-                if response_type == "ACCEPTED":
-                    self.show_notification(
-                        f"Your consultation request with {faculty_name} has been accepted!",
-                        "success"
-                    )
-                elif response_type == "DECLINED":
-                    message = data.get('message', 'Faculty is currently busy')
-                    self.show_notification(
-                        f"Your consultation request with {faculty_name} was declined: {message}",
-                        "warning"
-                    )
-                elif response_type == "TIMEOUT":
-                    self.show_notification(
-                        f"Your consultation request with {faculty_name} timed out without a response",
-                        "warning"
-                    )
-                    
-                # Refresh consultation history to show updated status
-                if hasattr(self, 'consultation_panel'):
-                    self.consultation_panel.refresh_history()
-                
-        except Exception as e:
-            logger.error(f"Error handling student notification: {e}")
-
     def handle_system_notification(self, topic, data):
         """
         Handle system notifications from MQTT.
@@ -1727,14 +1656,6 @@ class DashboardWindow(BaseWindow):
                     logger.debug(f"System notification for faculty {faculty_id} status processed, card_updated: {card_updated}. Triggering full UI refresh.")
                     # Schedule a full refresh to ensure data consistency
                     self.request_ui_refresh.emit()
-            
-            # Check if this is a consultation response notification for the logged-in student
-            elif data.get('type') == 'consultation_response' and self.student:
-                student_id = self.student.id if not isinstance(self.student, dict) else self.student.get('id')
-                if student_id and str(student_id) == str(data.get('student_id')):
-                    # Forward to student notification handler
-                    self.handle_student_notification(topic, data)
-                    
         except Exception as e:
             logger.error(f"Error handling system notification: {e}")
 

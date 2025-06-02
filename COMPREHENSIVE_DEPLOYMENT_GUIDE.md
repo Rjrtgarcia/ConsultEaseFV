@@ -1,7 +1,7 @@
 # ConsultEase Comprehensive Deployment Guide
 
 ## Overview
-This guide provides complete instructions for deploying the ConsultEase system on a Raspberry Pi production environment.
+This guide provides complete instructions for deploying the enhanced ConsultEase system with all Phase 1-4 improvements on a Raspberry Pi production environment.
 
 ## 🚀 SYSTEM IMPROVEMENTS SUMMARY
 
@@ -36,7 +36,6 @@ This guide provides complete instructions for deploying the ConsultEase system o
 - 32GB+ microSD card (Class 10 or better)
 - 10.1" touchscreen display
 - USB RFID reader
-- USB Keyboard
 - Stable internet connection
 - 5 nRF51822 BLE beacons (for faculty presence detection)
 - 5 ESP32 development boards (for faculty desk units)
@@ -63,6 +62,9 @@ sudo apt install -y python3-pyqt5 python3-pyqt5.qtcore python3-pyqt5.qtgui pytho
 
 # Install system monitoring tools
 sudo apt install -y htop iotop nethogs
+
+# Install squeekboard (preferred on-screen keyboard)
+sudo apt install -y squeekboard
 ```
 
 ### Step 2: Database Setup
@@ -145,6 +147,9 @@ Example configuration:
     "ui": {
         "fullscreen": true,
         "theme": "default"
+    },
+    "keyboard": {
+        "type": "squeekboard"
     }
 }
 ```
@@ -169,28 +174,13 @@ sudo systemctl daemon-reload
 sudo systemctl enable consultease
 ```
 
-### Step 8: Touchscreen Configuration
+### Step 8: Enhanced Startup Script
 ```bash
-# Make calibration script executable
-chmod +x scripts/calibrate_touch.sh
+# Make enhanced startup script executable
+chmod +x scripts/enhanced_startup.sh
 
-# Run calibration
-./scripts/calibrate_touch.sh
-```
-
-### Step 9: Enable Fullscreen Mode
-```bash
-# Enable fullscreen for deployment
-python scripts/enable_fullscreen.py
-```
-
-### Step 10: Start the Service
-```bash
-# Start ConsultEase service
-sudo systemctl start consultease
-
-# Check status
-sudo systemctl status consultease
+# Test enhanced startup
+./scripts/enhanced_startup.sh
 ```
 
 ## 🔍 SYSTEM VERIFICATION
@@ -200,105 +190,222 @@ sudo systemctl status consultease
 # Check system services
 sudo systemctl status postgresql mosquitto consultease
 
-# Check logs
-sudo journalctl -u consultease -f
+# Check system health
+python3 -c "
+from central_system.services.system_health import get_system_health_monitor
+monitor = get_system_health_monitor()
+print(monitor.get_overall_health())
+"
+
+# Check database connectivity
+python3 -c "
+from central_system.services.database_manager import get_database_manager
+db_manager = get_database_manager()
+print(db_manager.get_health_status())
+"
+
+# Check MQTT connectivity
+mosquitto_pub -h localhost -u consultease_user -P consultease_secure_password -t "test/connectivity" -m "test"
 ```
 
-## 📱 FACULTY DESK UNIT SETUP
+### Performance Monitoring
+```bash
+# Monitor system resources
+htop
 
-### Step 1: Prepare Arduino IDE
-1. Install Arduino IDE 2.0+
-2. Add ESP32 board support via Boards Manager
-3. Install required libraries:
-   - TFT_eSPI
-   - NimBLE-Arduino
-   - PubSubClient
-   - ArduinoJson
+# Monitor network connections
+netstat -tuln | grep -E "(5432|1883|5900)"
 
-### Step 2: Configure TFT_eSPI
-1. Edit User_Setup.h in TFT_eSPI library folder
-2. Enable ST7789 display and set correct pins
+# Check disk usage
+df -h
 
-### Step 3: Configure Faculty Desk Unit
-1. Open faculty_desk_unit/faculty_desk_unit.ino in Arduino IDE
-2. Copy config_production_template.h to config.h
-3. Edit config.h to set:
-   - WiFi credentials
-   - MQTT broker IP address (Raspberry Pi IP)
-   - Faculty ID and name
-   - BLE settings
+# Monitor logs
+tail -f /var/log/consultease/startup.log
+journalctl -u consultease -f
+```
 
-### Step 4: Upload Firmware
-1. Connect ESP32 to computer
-2. Select correct board and port in Arduino IDE
-3. Upload firmware
-4. Verify operation (display should show startup screen)
+## 🎯 ESP32 FACULTY DESK UNIT SETUP
 
-## 🔒 SECURITY RECOMMENDATIONS
+### Step 1: Hardware Configuration
+1. Connect TFT display to ESP32
+2. Configure BLE antenna
+3. Ensure stable power supply
+4. Test WiFi connectivity
 
-### Access Control
-1. Change default passwords for all accounts
-2. Use strong passwords for admin accounts
-3. Restrict physical access to the central system
+### Step 2: Firmware Configuration
+```cpp
+// Update config.h for each unit
+#define FACULTY_ID 1  // Unique for each unit
+#define FACULTY_NAME "Dr. Faculty Name"
+#define FACULTY_BEACON_MAC "AA:BB:CC:DD:EE:FF"  // Unique beacon MAC
+#define MQTT_SERVER "192.168.1.100"  // Central system IP
+#define MQTT_USERNAME "esp32_faculty_unit"
+#define MQTT_PASSWORD "STRONG_MQTT_PASSWORD_HERE"
+```
 
-### Network Security
-1. Use a dedicated WiFi network for the system
-2. Enable WPA2/WPA3 encryption on WiFi
-3. Consider using a VPN for remote access
+### Step 3: Deployment
+1. Flash firmware to each ESP32
+2. Test MQTT connectivity
+3. Verify BLE beacon detection
+4. Mount units at faculty desks
 
-### Database Security
-1. Regular backups of the database
-2. Keep PostgreSQL updated with security patches
-
-## 🛠️ TROUBLESHOOTING
+## 🔧 TROUBLESHOOTING
 
 ### Common Issues
 
-#### Service Fails to Start
-- Check logs: `sudo journalctl -u consultease -f`
-- Verify database connection in config.json
-- Check file permissions
-
-#### Touchscreen Issues
-- Run calibration script: `./scripts/calibrate_touch.sh`
-- Verify touchscreen is detected: `xinput list`
-
-#### MQTT Connection Problems
-- Check MQTT broker status: `sudo systemctl status mosquitto`
-- Verify network connectivity
-- Check credentials in config.json
-
-#### Faculty Desk Unit Not Connecting
-- Verify WiFi credentials in config.h
-- Check MQTT broker IP address
-- Restart ESP32 and check serial output
-
-## 🔄 MAINTENANCE
-
-### Regular Updates
+#### Database Connection Issues
 ```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
+# Check PostgreSQL status
+sudo systemctl status postgresql
 
-# Update ConsultEase
+# Test database connection
+sudo -u postgres psql consultease -c "SELECT 1;"
+
+# Reset database if needed
+sudo -u postgres dropdb consultease
+sudo -u postgres createdb consultease
+```
+
+#### MQTT Connection Issues
+```bash
+# Check mosquitto status
+sudo systemctl status mosquitto
+
+# Test MQTT connection
+mosquitto_pub -h localhost -t "test" -m "hello"
+
+# Check MQTT logs
+sudo journalctl -u mosquitto -f
+```
+
+#### Service Startup Issues
+```bash
+# Check service logs
+journalctl -u consultease -f
+
+# Manual startup for debugging
 cd /home/pi/ConsultEase
-git pull
 source venv/bin/activate
-pip install -r requirements.txt
-sudo systemctl restart consultease
+python3 central_system/main.py
 ```
 
-### Database Maintenance
+#### Performance Issues
 ```bash
-# Backup database
-sudo -u postgres pg_dump consultease > consultease_backup_$(date +%Y%m%d).sql
+# Check system resources
+free -h
+df -h
+top
 
-# Restore database (if needed)
-sudo -u postgres psql consultease < consultease_backup_YYYYMMDD.sql
+# Clean up disk space
+sudo apt autoremove
+sudo apt autoclean
 ```
+
+## 📊 MONITORING AND MAINTENANCE
+
+### Daily Monitoring
+- Check system health dashboard
+- Monitor resource usage
+- Review error logs
+- Verify ESP32 connectivity
+
+### Weekly Maintenance
+- Update system packages
+- Clean log files
+- Backup database
+- Test system recovery
+
+### Monthly Tasks
+- Full system backup
+- Performance analysis
+- Security audit
+- Hardware inspection
+
+## 🔒 SECURITY CONSIDERATIONS
+
+### Network Security
+- Use strong passwords for all accounts
+- Enable firewall with minimal open ports
+- Regular security updates
+- Monitor network traffic
+
+### Application Security
+- Change default admin password immediately
+- Regular password rotation
+- Monitor admin access logs
+- Secure MQTT communications
+
+### Physical Security
+- Secure Raspberry Pi in locked enclosure
+- Protect network cables
+- Secure ESP32 units
+- Monitor physical access
+
+## 📈 PERFORMANCE OPTIMIZATION
+
+### System Optimization
+```bash
+# Optimize PostgreSQL
+sudo nano /etc/postgresql/13/main/postgresql.conf
+# Adjust shared_buffers, effective_cache_size
+
+# Optimize system swappiness
+echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf
+
+# Enable GPU memory split
+sudo raspi-config
+# Advanced Options -> Memory Split -> 64
+```
+
+### Application Optimization
+- Monitor database query performance
+- Optimize MQTT message frequency
+- Regular cache cleanup
+- Monitor memory usage
+
+## 🎉 DEPLOYMENT COMPLETION
+
+### Final Verification Checklist
+- [ ] All services running and healthy
+- [ ] Database connectivity verified
+- [ ] MQTT communication working
+- [ ] UI responsive and accessible
+- [ ] ESP32 units connected
+- [ ] BLE beacon detection working
+- [ ] Admin access functional
+- [ ] System monitoring active
+- [ ] Backup procedures tested
+- [ ] Documentation updated
+
+### Success Indicators
+- System health status: Healthy
+- All services: Running
+- Database connections: Stable
+- MQTT messages: Flowing
+- UI performance: Responsive
+- Error rate: < 1%
+- Uptime: > 99%
 
 ## 📞 SUPPORT
 
-For additional assistance, refer to the documentation in the docs/ directory:
-- User manual
-- Quick start guide
+### Log Locations
+- Application logs: `/var/log/consultease/`
+- System logs: `journalctl -u consultease`
+- Database logs: `/var/log/postgresql/`
+- MQTT logs: `journalctl -u mosquitto`
+
+### Diagnostic Commands
+```bash
+# System health check
+./scripts/enhanced_startup.sh
+
+# Service status
+sudo systemctl status consultease postgresql mosquitto
+
+# Resource usage
+htop
+iotop
+nethogs
+```
+
+The ConsultEase system is now fully deployed with comprehensive improvements across all four phases, providing a robust, secure, and high-performance solution for faculty consultation management.

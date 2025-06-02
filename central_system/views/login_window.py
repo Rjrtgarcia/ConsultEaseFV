@@ -30,6 +30,9 @@ class LoginWindow(BaseWindow):
         self.scanning_timer.timeout.connect(self.update_scanning_animation)
         self.scanning_animation_frame = 0
 
+        # The left panel is no longer needed since we moved the simulate button
+        # to the scanning frame
+
     def init_ui(self):
         """
         Initialize the login UI components.
@@ -138,6 +141,27 @@ class LoginWindow(BaseWindow):
 
         scanning_layout.addLayout(manual_input_layout)
 
+        # Add the simulate button inside the scanning frame
+        self.simulate_button = QPushButton("Simulate RFID Scan")
+        self.simulate_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ConsultEaseTheme.SECONDARY_COLOR};
+                color: {ConsultEaseTheme.TEXT_PRIMARY};
+                border: none;
+                padding: {ConsultEaseTheme.PADDING_NORMAL}px {ConsultEaseTheme.PADDING_LARGE}px;
+                border-radius: {ConsultEaseTheme.BORDER_RADIUS_NORMAL}px;
+                font-weight: bold;
+                margin-top: 15px;
+                min-height: {ConsultEaseTheme.TOUCH_MIN_HEIGHT}px;
+            }}
+            QPushButton:hover {{
+                background-color: #2980b9;
+                color: {ConsultEaseTheme.TEXT_LIGHT};
+            }}
+        """)
+        self.simulate_button.clicked.connect(self.simulate_rfid_scan)
+        scanning_layout.addWidget(self.simulate_button)
+
         content_frame_layout.addWidget(self.scanning_frame, 1)
 
         # Add content to main layout
@@ -197,8 +221,144 @@ class LoginWindow(BaseWindow):
         self.logger.info("LoginWindow shown, starting RFID scanning")
         self.start_rfid_scanning()
 
-        # Focus the RFID input field
-        self.rfid_input.setFocus()
+        # Force the keyboard to show up for manual RFID entry
+        try:
+            # Focus the RFID input field to trigger the keyboard
+            self.rfid_input.setFocus()
+
+            # Make sure the input field has the keyboard property set
+            self.rfid_input.setProperty("keyboardOnFocus", True)
+
+            # Try all available keyboard methods
+            from PyQt5.QtWidgets import QApplication
+            main_app = QApplication.instance()
+
+            # Method 1: Use direct keyboard integration
+            direct_keyboard = None
+            try:
+                if hasattr(main_app, 'direct_keyboard') and main_app.direct_keyboard:
+                    direct_keyboard = main_app.direct_keyboard
+                    self.logger.info("Found direct keyboard integration in main application")
+
+                    # Show keyboard with multiple attempts
+                    direct_keyboard.show_keyboard()
+                    QTimer.singleShot(500, direct_keyboard.show_keyboard)
+                    QTimer.singleShot(1000, direct_keyboard.show_keyboard)
+
+                    # Set environment variable to prefer squeekboard
+                    os.environ["CONSULTEASE_KEYBOARD"] = "squeekboard"
+                    self.logger.info("Set CONSULTEASE_KEYBOARD=squeekboard environment variable")
+            except Exception as e:
+                self.logger.error(f"Error using direct keyboard integration: {str(e)}")
+
+            # Method 2: Use keyboard handler
+            keyboard_handler = None
+            try:
+                if hasattr(main_app, 'keyboard_handler') and main_app.keyboard_handler:
+                    keyboard_handler = main_app.keyboard_handler
+                    self.logger.info("Found keyboard handler in main application")
+
+                    # Try multiple times with delays to ensure it appears
+                    keyboard_handler.force_show_keyboard()
+                    QTimer.singleShot(500, keyboard_handler.force_show_keyboard)
+                    QTimer.singleShot(1000, keyboard_handler.force_show_keyboard)
+
+                    # Set environment variable to prefer squeekboard
+                    os.environ["CONSULTEASE_KEYBOARD"] = "squeekboard"
+                    self.logger.info("Set CONSULTEASE_KEYBOARD=squeekboard environment variable")
+            except Exception as e:
+                self.logger.error(f"Error using keyboard handler: {str(e)}")
+
+            # Method 3: Direct DBus and command-line approaches
+            if not direct_keyboard and not keyboard_handler:
+                self.logger.info("No keyboard handlers found, using direct methods")
+
+                # Try direct DBus call
+                import subprocess
+                import sys
+                import os
+
+                if sys.platform.startswith('linux'):
+                    try:
+                        # Try to start squeekboard first
+                        try:
+                            # Check if squeekboard is available
+                            squeekboard_check = subprocess.run(['which', 'squeekboard'],
+                                                        stdout=subprocess.PIPE,
+                                                        stderr=subprocess.PIPE)
+
+                            if squeekboard_check.returncode == 0:
+                                # Kill any existing instances
+                                subprocess.run(['pkill', '-f', 'squeekboard'],
+                                             stdout=subprocess.DEVNULL,
+                                             stderr=subprocess.DEVNULL)
+
+                                # Start squeekboard with appropriate options
+                                env = dict(os.environ)
+                                env['SQUEEKBOARD_FORCE'] = '1'
+                                env['GDK_BACKEND'] = 'wayland,x11'
+                                env['QT_QPA_PLATFORM'] = 'wayland;xcb'
+
+                                subprocess.Popen(['squeekboard'],
+                                               stdout=subprocess.DEVNULL,
+                                               stderr=subprocess.DEVNULL,
+                                               env=env,
+                                               start_new_session=True)
+
+                                # Try DBus method to show squeekboard
+                                cmd = [
+                                    "dbus-send", "--type=method_call", "--dest=sm.puri.OSK0",
+                                    "/sm/puri/OSK0", "sm.puri.OSK0.SetVisible", "boolean:true"
+                                ]
+                                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                self.logger.info("Started squeekboard directly")
+
+                                # Try again after delays
+                                QTimer.singleShot(500, lambda: subprocess.Popen(cmd,
+                                                                              stdout=subprocess.DEVNULL,
+                                                                              stderr=subprocess.DEVNULL))
+                            else:
+                                # Fallback to onboard
+                                # Check if onboard is available
+                                onboard_check = subprocess.run(['which', 'onboard'],
+                                                            stdout=subprocess.PIPE,
+                                                            stderr=subprocess.PIPE)
+
+                                if onboard_check.returncode == 0:
+                                    # Kill any existing instances
+                                    subprocess.run(['pkill', '-f', 'onboard'],
+                                                 stdout=subprocess.DEVNULL,
+                                                 stderr=subprocess.DEVNULL)
+
+                                    # Start onboard with appropriate options
+                                    subprocess.Popen(
+                                        ['onboard', '--size=small', '--layout=Phone', '--enable-background-transparency'],
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL,
+                                        start_new_session=True
+                                    )
+                                    self.logger.info("Started onboard as fallback")
+                        except Exception as e:
+                            self.logger.error(f"Error starting squeekboard: {e}")
+
+                        # Try using the keyboard-show.sh script if it exists
+                        home_dir = os.path.expanduser("~")
+                        script_path = os.path.join(home_dir, "keyboard-show.sh")
+                        if os.path.exists(script_path):
+                            self.logger.info("Using keyboard-show.sh script")
+                            QTimer.singleShot(1500, lambda: subprocess.Popen([script_path],
+                                                                          stdout=subprocess.DEVNULL,
+                                                                          stderr=subprocess.DEVNULL))
+                    except Exception as e:
+                        self.logger.error(f"Error with direct keyboard methods: {str(e)}")
+
+            # Focus the input field again after a delay
+            QTimer.singleShot(300, lambda: self.rfid_input.setFocus())
+
+        except Exception as e:
+            self.logger.error(f"Error showing keyboard: {str(e)}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
 
     def resizeEvent(self, event):
         """Handle window resize"""
@@ -339,7 +499,6 @@ class LoginWindow(BaseWindow):
                     'updated_at': None
                 }
 
-            # Show success visual feedback (no modal dialog)
             self.show_success(f"Welcome, {student_data['name']}!")
 
             # Log the emission of the signal
@@ -352,8 +511,8 @@ class LoginWindow(BaseWindow):
             self.logger.info(f"LoginWindow: Emitting change_window signal for dashboard")
             self.change_window.emit("dashboard", student_data)
 
-            # Auto-navigate to dashboard after a brief delay (1.5 seconds) to allow user to see the welcome message
-            QTimer.singleShot(1500, lambda: self._force_dashboard_navigation(student_data))
+            # Force a delay to ensure the signals are processed
+            QTimer.singleShot(500, lambda: self._force_dashboard_navigation(student_data))
         else:
             # Authentication failed
             self.logger.warning(f"Authentication failed for RFID: {rfid_uid}")
@@ -372,7 +531,6 @@ class LoginWindow(BaseWindow):
     def show_success(self, message):
         """
         Show success message and visual feedback.
-        No need to navigate to dashboard as that's handled by handle_rfid_read.
         """
         self.scanning_status_label.setText("Authenticated")
         self.scanning_status_label.setStyleSheet("font-size: 20pt; color: #4caf50;")
@@ -385,24 +543,12 @@ class LoginWindow(BaseWindow):
         ''')
         self.rfid_icon_label.setText("✅")
 
-        # Display welcome message directly on the frame
-        welcome_label = QLabel(message)
-        welcome_label.setAlignment(Qt.AlignCenter)
-        welcome_label.setStyleSheet("font-size: 18pt; color: #4caf50; font-weight: bold;")
-        
-        # Add welcome message to the scanning frame layout
-        if self.scanning_frame.layout():
-            self.scanning_frame.layout().addWidget(welcome_label)
-        
-        # Log the welcome message
-        self.logger.info(f"Authentication success: {message}")
-        
-        # No need to call _force_dashboard_navigation here as it's already called in handle_rfid_read
+        # Show message in a popup
+        QMessageBox.information(self, "Authentication Success", message)
 
     def show_error(self, message):
         """
         Show error message and visual feedback.
-        Automatically reset after a delay.
         """
         self.scanning_status_label.setText("Error")
         self.scanning_status_label.setStyleSheet("font-size: 20pt; color: #f44336;")
@@ -415,44 +561,57 @@ class LoginWindow(BaseWindow):
         ''')
         self.rfid_icon_label.setText("❌")
 
-        # Display error message directly on the frame
-        error_label = QLabel(message)
-        error_label.setAlignment(Qt.AlignCenter)
-        error_label.setStyleSheet("font-size: 14pt; color: #f44336; font-weight: bold; word-wrap: break-word;")
-        error_label.setWordWrap(True)
-        
-        # Add error message to the scanning frame layout
-        if self.scanning_frame.layout():
-            self.scanning_frame.layout().addWidget(error_label)
-        
-        # Log the error message
-        self.logger.warning(f"Authentication error: {message}")
+        # Show error in a popup
+        QMessageBox.warning(self, "Authentication Error", message)
 
         # Reset after a delay
-        QTimer.singleShot(3000, lambda: self._reset_after_error(error_label))
-        
-    def _reset_after_error(self, error_label):
-        """
-        Reset the UI after an error is displayed.
-        
-        Args:
-            error_label (QLabel): The error message label to remove
-        """
-        # Remove the error label if it exists
-        if error_label and error_label.parent():
-            error_label.setParent(None)
-            error_label.deleteLater()
-            
-        # Reset the scanning UI
-        self.stop_rfid_scanning()
-        # Restart scanning after a short pause
-        QTimer.singleShot(500, self.start_rfid_scanning)
+        QTimer.singleShot(3000, self.stop_rfid_scanning)
 
     def admin_login(self):
         """
         Handle admin login button click.
         """
         self.change_window.emit("admin_login", None)
+
+    def simulate_rfid_scan(self):
+        """
+        Simulate an RFID scan for development purposes.
+        """
+        # Start the scanning animation
+        self.start_rfid_scanning()
+
+        # Get the RFID service and simulate a card read
+        try:
+            # Try to get a real student RFID from the database
+            from ..models import Student, get_db
+            db = get_db()
+            student = db.query(Student).first()
+
+            if student and student.rfid_uid:
+                self.logger.info(f"Simulating RFID scan with real student: {student.name}, RFID: {student.rfid_uid}")
+                rfid_uid = student.rfid_uid
+            else:
+                self.logger.info("No students found in database, using default RFID")
+                rfid_uid = "TESTCARD123"  # Use the test card we added
+
+            from ..services import get_rfid_service
+            rfid_service = get_rfid_service()
+
+            # Refresh the RFID service to ensure it has the latest student data
+            rfid_service.refresh_student_data()
+            self.logger.info("Refreshed RFID service student data before simulating scan")
+
+            # Simulate a card read - this will trigger the normal authentication flow
+            # through the registered callbacks
+            self.logger.info(f"Simulating RFID scan with UID: {rfid_uid}")
+            rfid_service.simulate_card_read(rfid_uid)
+        except Exception as e:
+            self.logger.error(f"Error simulating RFID scan: {str(e)}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+
+            # If there's an error, stop the scanning animation and show an error
+            QTimer.singleShot(1000, lambda: self.handle_rfid_read("TESTCARD123", None))
 
     def handle_manual_rfid_entry(self):
         """
@@ -475,7 +634,7 @@ class LoginWindow(BaseWindow):
 
                 # Use the entered RFID UID - this will trigger the normal authentication flow
                 # through the registered callbacks
-                self.logger.info(f"Processing manually entered RFID UID: {rfid_uid}")
+                self.logger.info(f"Simulating RFID scan with manually entered UID: {rfid_uid}")
                 rfid_service.simulate_card_read(rfid_uid)
             except Exception as e:
                 self.logger.error(f"Error processing manual RFID entry: {str(e)}")
@@ -485,3 +644,387 @@ class LoginWindow(BaseWindow):
                 # If there's an error, directly handle the RFID read
                 self.logger.info(f"Directly handling RFID read due to error: {rfid_uid}")
                 QTimer.singleShot(1000, lambda: self.handle_rfid_read(rfid_uid, None))
+
+# Create a script to ensure the keyboard works on Raspberry Pi
+def create_keyboard_setup_script():
+    """
+    Create a script to set up the virtual keyboard on the Raspberry Pi.
+    This should be called when deploying the application.
+    """
+    script_content = """#!/bin/bash
+# Enhanced setup script for ConsultEase virtual keyboard
+echo "Setting up ConsultEase virtual keyboard..."
+
+# Ensure squeekboard is installed (preferred)
+if ! command -v squeekboard &> /dev/null; then
+    echo "Squeekboard not found, attempting to install..."
+    sudo apt update
+    sudo apt install -y squeekboard
+fi
+
+# Ensure dbus-x11 is installed for dbus-send command (required for squeekboard)
+if ! command -v dbus-send &> /dev/null; then
+    echo "dbus-send not found, installing dbus-x11 package..."
+    sudo apt update
+    sudo apt install -y dbus-x11
+fi
+
+# Ensure onboard is installed as fallback
+if ! command -v onboard &> /dev/null; then
+    echo "Onboard not found, installing as fallback..."
+    sudo apt update
+    sudo apt install -y onboard
+fi
+
+# Configure squeekboard
+echo "Configuring squeekboard..."
+
+# Make sure squeekboard service is enabled
+if command -v systemctl &> /dev/null; then
+    echo "Enabling squeekboard service..."
+    systemctl --user enable squeekboard.service 2>/dev/null
+fi
+
+# Configure onboard as fallback
+if command -v onboard &> /dev/null; then
+    echo "Configuring onboard as fallback..."
+    mkdir -p ~/.config/autostart
+    cat > ~/.config/autostart/onboard-autostart.desktop << EOF
+[Desktop Entry]
+Type=Application
+Name=Onboard
+Exec=onboard --size=small --layout=Phone --enable-background-transparency --theme=Nightshade
+Comment=Flexible on-screen keyboard
+EOF
+
+    # Create onboard configuration directory
+    mkdir -p ~/.config/onboard
+
+    # Create onboard configuration file with touch-friendly settings
+    cat > ~/.config/onboard/onboard.conf << EOF
+[main]
+layout=Phone
+theme=Nightshade
+key-size=small
+enable-background-transparency=true
+show-status-icon=true
+start-minimized=false
+show-tooltips=false
+auto-show=true
+auto-show-delay=500
+auto-hide=true
+auto-hide-delay=1000
+xembed-onboard=true
+enable-touch-input=true
+touch-feedback-enabled=true
+touch-feedback-size=small
+EOF
+fi
+
+# Start squeekboard
+echo "Starting squeekboard..."
+pkill -f squeekboard
+if command -v squeekboard &> /dev/null; then
+    # Start squeekboard with environment variables
+    SQUEEKBOARD_FORCE=1 GDK_BACKEND=wayland,x11 QT_QPA_PLATFORM=wayland squeekboard &
+    sleep 0.5
+
+    # Show squeekboard
+    if command -v dbus-send &> /dev/null; then
+        dbus-send --type=method_call --dest=sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0.SetVisible boolean:true
+    fi
+fi
+
+# Set environment variables for proper keyboard operation
+echo "Setting up environment variables..."
+mkdir -p ~/.config/environment.d/
+cat > ~/.config/environment.d/consultease.conf << EOF
+# ConsultEase keyboard environment variables
+GDK_BACKEND=wayland,x11
+QT_QPA_PLATFORM=wayland;xcb
+SQUEEKBOARD_FORCE=1
+CONSULTEASE_KEYBOARD=squeekboard
+CONSULTEASE_KEYBOARD_DEBUG=true
+MOZ_ENABLE_WAYLAND=1
+QT_IM_MODULE=wayland
+CLUTTER_IM_MODULE=wayland
+# Onboard variables as fallback
+ONBOARD_ENABLE_TOUCH=1
+ONBOARD_XEMBED=1
+EOF
+
+# Also add to .bashrc for immediate effect
+if ! grep -q "CONSULTEASE_KEYBOARD" ~/.bashrc; then
+    echo "Adding environment variables to .bashrc..."
+    cat >> ~/.bashrc << EOF
+
+# ConsultEase keyboard environment variables
+export GDK_BACKEND=wayland,x11
+export QT_QPA_PLATFORM=wayland;xcb
+export SQUEEKBOARD_FORCE=1
+export CONSULTEASE_KEYBOARD=squeekboard
+export CONSULTEASE_KEYBOARD_DEBUG=true
+export MOZ_ENABLE_WAYLAND=1
+export QT_IM_MODULE=wayland
+export CLUTTER_IM_MODULE=wayland
+# Onboard variables as fallback
+export ONBOARD_ENABLE_TOUCH=1
+export ONBOARD_XEMBED=1
+EOF
+fi
+
+# Create keyboard management scripts
+echo "Creating keyboard management scripts..."
+
+# Create keyboard toggle script
+cat > ~/keyboard-toggle.sh << EOF
+#!/bin/bash
+# Toggle on-screen keyboard visibility
+
+# Check for squeekboard first
+if command -v dbus-send &> /dev/null; then
+    if dbus-send --print-reply --type=method_call --dest=sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0.GetVisible | grep -q "boolean true"; then
+        dbus-send --type=method_call --dest=sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0.SetVisible boolean:false
+        echo "Squeekboard hidden"
+    else
+        dbus-send --type=method_call --dest=sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0.SetVisible boolean:true
+        echo "Squeekboard shown"
+    fi
+# Check for onboard as fallback
+elif command -v onboard &> /dev/null; then
+    if pgrep -f onboard > /dev/null; then
+        pkill -f onboard
+        echo "Onboard keyboard hidden"
+    else
+        onboard --size=small --layout=Phone --enable-background-transparency &
+        echo "Onboard keyboard shown"
+    fi
+# Try matchbox as last resort
+elif command -v matchbox-keyboard &> /dev/null; then
+    if pgrep -f matchbox-keyboard > /dev/null; then
+        pkill -f matchbox-keyboard
+        echo "Matchbox keyboard hidden"
+    else
+        matchbox-keyboard &
+        echo "Matchbox keyboard shown"
+    fi
+else
+    echo "No supported on-screen keyboard found"
+fi
+EOF
+chmod +x ~/keyboard-toggle.sh
+
+# Create keyboard show script
+cat > ~/keyboard-show.sh << EOF
+#!/bin/bash
+# Force show keyboard
+
+# Try squeekboard first
+if command -v dbus-send &> /dev/null; then
+    # Make sure squeekboard is running
+    if command -v squeekboard &> /dev/null; then
+        # Check if squeekboard is running
+        if ! pgrep -f squeekboard > /dev/null; then
+            # Start squeekboard with environment variables
+            SQUEEKBOARD_FORCE=1 GDK_BACKEND=wayland,x11 QT_QPA_PLATFORM=wayland squeekboard &
+            sleep 0.5
+        fi
+    fi
+
+    # Show squeekboard
+    dbus-send --type=method_call --dest=sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0.SetVisible boolean:true
+    echo "Squeekboard shown"
+    exit 0
+fi
+
+# Try onboard as fallback
+if command -v onboard &> /dev/null; then
+    # Kill any existing instances
+    pkill -f onboard
+    # Start onboard with appropriate options
+    onboard --size=small --layout=Phone --enable-background-transparency --theme=Nightshade &
+    echo "Onboard keyboard shown"
+    exit 0
+fi
+
+# Try matchbox as last resort
+if command -v matchbox-keyboard &> /dev/null; then
+    matchbox-keyboard &
+    echo "Matchbox keyboard shown"
+    exit 0
+fi
+
+echo "No supported on-screen keyboard found"
+EOF
+chmod +x ~/keyboard-show.sh
+
+# Create keyboard hide script
+cat > ~/keyboard-hide.sh << EOF
+#!/bin/bash
+# Force hide keyboard
+
+# Try squeekboard first
+if command -v dbus-send &> /dev/null; then
+    dbus-send --type=method_call --dest=sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0.SetVisible boolean:false
+    echo "Squeekboard hidden"
+    exit 0
+fi
+
+# Try onboard as fallback
+if command -v onboard &> /dev/null; then
+    pkill -f onboard
+    echo "Onboard keyboard hidden"
+    exit 0
+fi
+
+# Try matchbox as last resort
+if command -v matchbox-keyboard &> /dev/null; then
+    pkill -f matchbox-keyboard
+    echo "Matchbox keyboard hidden"
+    exit 0
+fi
+
+echo "No supported on-screen keyboard found"
+EOF
+chmod +x ~/keyboard-hide.sh
+
+# Create keyboard status script
+cat > ~/keyboard-status.sh << EOF
+#!/bin/bash
+# Check keyboard status
+
+# Check for onboard
+if command -v onboard &> /dev/null; then
+    echo "Onboard status:"
+    if pgrep -f onboard > /dev/null; then
+        echo "Onboard is RUNNING"
+    else
+        echo "Onboard is NOT RUNNING"
+    fi
+fi
+
+# Check for squeekboard
+if command -v systemctl &> /dev/null && command -v dbus-send &> /dev/null; then
+    echo -e "\\nSqueekboard service status:"
+    systemctl --user status squeekboard.service 2>/dev/null || echo "Squeekboard service not found"
+
+    echo -e "\\nSqueekboard visibility:"
+    if dbus-send --print-reply --type=method_call --dest=sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0.GetVisible 2>/dev/null | grep -q "boolean true"; then
+        echo "Squeekboard is VISIBLE"
+    else
+        echo "Squeekboard is HIDDEN or not available"
+    fi
+fi
+
+# Check for matchbox
+if command -v matchbox-keyboard &> /dev/null; then
+    echo -e "\\nMatchbox keyboard status:"
+    if pgrep -f matchbox-keyboard > /dev/null; then
+        echo "Matchbox keyboard is RUNNING"
+    else
+        echo "Matchbox keyboard is NOT RUNNING"
+    fi
+fi
+EOF
+chmod +x ~/keyboard-status.sh
+
+# Create keyboard restart script
+cat > ~/keyboard-restart.sh << EOF
+#!/bin/bash
+# Restart keyboard
+
+# Try squeekboard first
+if command -v systemctl &> /dev/null; then
+    echo "Restarting squeekboard service..."
+    systemctl --user stop squeekboard.service 2>/dev/null
+    pkill -f squeekboard
+    sleep 1
+    systemctl --user start squeekboard.service 2>/dev/null
+
+    # Check if service is running
+    if systemctl --user is-active squeekboard.service 2>/dev/null; then
+        echo "Squeekboard service restarted successfully"
+    else
+        echo "Warning: Squeekboard service failed to restart. Starting manually..."
+        # Try starting squeekboard directly
+        if command -v squeekboard &> /dev/null; then
+            nohup squeekboard > /dev/null 2>&1 &
+        fi
+    fi
+
+    # Force show the keyboard
+    if command -v dbus-send &> /dev/null; then
+        dbus-send --type=method_call --dest=sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0.SetVisible boolean:true
+        echo "Squeekboard shown"
+    fi
+    exit 0
+fi
+
+# Try onboard as fallback
+if command -v onboard &> /dev/null; then
+    echo "Restarting onboard..."
+    pkill -f onboard
+    sleep 1
+    onboard --size=small --layout=Phone --enable-background-transparency --theme=Nightshade &
+    echo "Onboard restarted"
+    exit 0
+fi
+
+# Try matchbox as last resort
+if command -v matchbox-keyboard &> /dev/null; then
+    echo "Restarting matchbox-keyboard..."
+    pkill -f matchbox-keyboard
+    sleep 1
+    matchbox-keyboard &
+    echo "Matchbox keyboard restarted"
+    exit 0
+fi
+
+echo "No supported on-screen keyboard found"
+EOF
+chmod +x ~/keyboard-restart.sh
+
+# Create desktop shortcut for keyboard toggle
+mkdir -p ~/.local/share/applications/
+cat > ~/.local/share/applications/keyboard-toggle.desktop << EOF
+[Desktop Entry]
+Name=Toggle Keyboard
+Comment=Toggle on-screen keyboard visibility
+Exec=/bin/bash ~/keyboard-toggle.sh
+Icon=input-keyboard
+Terminal=false
+Type=Application
+Categories=Utility;
+EOF
+
+echo "Setup complete! For changes to fully take effect, please reboot your system."
+echo ""
+echo "Keyboard management scripts created:"
+echo "  ~/keyboard-toggle.sh - Toggle keyboard visibility"
+echo "  ~/keyboard-show.sh - Force show keyboard"
+echo "  ~/keyboard-hide.sh - Force hide keyboard"
+echo "  ~/keyboard-status.sh - Check keyboard status"
+echo "  ~/keyboard-restart.sh - Restart keyboard service"
+echo ""
+echo "If the keyboard doesn't appear automatically, try:"
+echo "1. Run ~/keyboard-show.sh to manually show it"
+echo "2. Run ~/keyboard-restart.sh to restart the keyboard service"
+echo "3. Press F5 in the application to toggle the keyboard"
+"""
+
+    # Create scripts directory if it doesn't exist
+    script_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts")
+    os.makedirs(script_dir, exist_ok=True)
+
+    # Write the script
+    script_path = os.path.join(script_dir, "setup_keyboard.sh")
+    with open(script_path, "w") as f:
+        f.write(script_content)
+
+    # Make the script executable on Unix
+    if os.name == "posix":
+        import stat
+        st = os.stat(script_path)
+        os.chmod(script_path, st.st_mode | stat.S_IEXEC)
+
+    return script_path

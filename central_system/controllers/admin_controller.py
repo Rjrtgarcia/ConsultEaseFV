@@ -207,15 +207,13 @@ class AdminController:
                 'error': f'Failed to create account: {str(e)}'
             }
 
-    def create_admin(self, username, password, email=None, force_change_password=False):
+    def create_admin(self, username, password):
         """
         Create a new admin user with password validation.
 
         Args:
             username (str): Admin username
             password (str): Admin password
-            email (str, optional): Admin email address
-            force_change_password (bool): Whether to force password change on first login
 
         Returns:
             tuple: (Admin object or None, list of validation errors)
@@ -244,9 +242,7 @@ class AdminController:
                 username=username,
                 password_hash=password_hash,
                 salt=salt,
-                email=email,
-                is_active=True,
-                force_change_password=force_change_password
+                is_active=True
             )
 
             db.add(admin)
@@ -490,90 +486,3 @@ class AdminController:
         except Exception as e:
             logger.error(f"Error ensuring default admin: {str(e)}")
             return False
-
-    def authenticate_admin(self, username, password):
-        """
-        Authenticate an admin user and return the Admin object directly.
-        This is a wrapper around the authenticate method for cleaner use in main.py.
-
-        Args:
-            username (str): Admin username
-            password (str): Admin password
-
-        Returns:
-            Admin: The authenticated admin object or None if authentication fails
-        """
-        result = self.authenticate(username, password)
-        if result and 'admin' in result:
-            return result['admin']
-        return None
-
-    def get_admin_by_username(self, username):
-        """
-        Get an admin by username.
-
-        Args:
-            username (str): The username to look up
-
-        Returns:
-            Admin: The admin object if found, None otherwise
-        """
-        try:
-            db = get_db()
-            admin = db.query(Admin).filter(Admin.username == username).first()
-            return admin
-        except Exception as e:
-            logger.error(f"Error getting admin by username {username}: {e}")
-            return None
-
-    def hash_password(self, password):
-        """
-        Hash a password using the Admin model's hash_password method.
-        
-        Args:
-            password (str): The password to hash
-            
-        Returns:
-            str: The hashed password
-        """
-        try:
-            password_hash, salt = Admin.hash_password(password)
-            return password_hash
-        except Exception as e:
-            logger.error(f"Error hashing password: {e}")
-            return None
-
-    def get_student_by_id(self, student_id):
-        """
-        Get a student by ID.
-
-        Args:
-            student_id (int): The student ID to look up
-
-        Returns:
-            Student: The student object if found, None otherwise
-        """
-        try:
-            from ..models import Student
-            db = get_db()
-            student = db.query(Student).filter(Student.id == student_id).first()
-            return student
-        except Exception as e:
-            logger.error(f"Error getting student by ID {student_id}: {e}")
-            return None
-
-    def get_all_students(self):
-        """
-        Get all students.
-
-        Returns:
-            list: List of Student objects
-        """
-        try:
-            from ..models import Student
-            db = get_db()
-            students = db.query(Student).all()
-            return students
-        except Exception as e:
-            logger.error(f"Error getting all students: {e}")
-            return []

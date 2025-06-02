@@ -185,7 +185,7 @@ class FacultyResponseController:
             response_data (dict): Faculty response data. Expected to contain:
                                   'faculty_id': ID of the faculty responding (from payload)
                                   'message_id': consultation_id being responded to
-                                  'response_type': e.g., "ACKNOWLEDGE", "ACCEPTED", "DECLINED", "COMPLETED"
+                                  'response_type': e.g., "ACKNOWLEDGE", "REJECTED", "COMPLETED"
 
         Returns:
             bool: True if processed successfully
@@ -228,22 +228,19 @@ class FacultyResponseController:
                 new_status_enum: Optional[ConsultationStatus] = None
                 if response_type == "ACKNOWLEDGE" or response_type == "ACCEPTED":
                     new_status_enum = ConsultationStatus.ACCEPTED
-                elif response_type == "REJECTED" or response_type == "DECLINED": 
-                    new_status_enum = ConsultationStatus.DECLINED
+                elif response_type == "REJECTED" or response_type == "DECLINED": # Allow "DECLINED"
+                    new_status_enum = ConsultationStatus.REJECTED
                 elif response_type == "COMPLETED":
                     new_status_enum = ConsultationStatus.COMPLETED
-                elif response_type == "TIMEOUT":
-                    new_status_enum = ConsultationStatus.TIMEOUT
+                # Add other states like STARTED, BUSY if your faculty unit supports them
+                # Example:
+                # elif response_type == "BUSY":
+                # new_status_enum = ConsultationStatus.BUSY # Assuming you add this to Enum
 
                 if new_status_enum:
                     # Import ConsultationController locally or ensure it's available via __init__
                     from .consultation_controller import ConsultationController as SystemConsultationController
                     cc = SystemConsultationController()
-                    
-                    # Add any response message if provided
-                    if 'response_message' in response_data:
-                        consultation.response_message = response_data['response_message']
-                    
                     updated_consultation = cc.update_consultation_status(consultation.id, new_status_enum)
                     
                     if updated_consultation:
@@ -251,73 +248,21 @@ class FacultyResponseController:
                         # Add consultation_id and student_id to response_data for callbacks, if not already there
                         response_data['consultation_id'] = consultation.id 
                         response_data['student_id'] = consultation.student_id
-                        
-                        # Notify student of faculty response
-                        self._notify_student_of_response(updated_consultation, response_type)
-                        
                         return True
                     else:
-                        logger.error(f"Failed to update consultation {consultation.id} status via ConsultationController.")
+                        logger.error(f"Failed to update consultation {consultation.id} to {new_status_enum.value} using ConsultationController.")
                         return False
                 else:
-                    logger.warning(f"Unrecognized response type '{response_type}' for consultation {consultation.id}.")
+                    logger.warning(f"Unknown or unhandled response_type: '{response_type}' for consultation {consultation.id}. Status not changed.")
                     return False
-                
             finally:
                 db.close()
-                
+
         except Exception as e:
-            logger.error(f"Error processing faculty response: {str(e)}")
+            logger.error(f"Critical error in _process_faculty_response: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             return False
-            
-    def _notify_student_of_response(self, consultation, response_type):
-        """
-        Notify student of faculty response to consultation request.
-        
-        Args:
-            consultation (Consultation): Updated consultation object
-            response_type (str): Type of response (e.g., "ACCEPTED", "DECLINED")
-        """
-        try:
-            # Get student and faculty details
-            student_id = consultation.student_id
-            faculty_id = consultation.faculty_id
-            consultation_id = consultation.id
-            
-            # Get student and faculty names
-            student_name = getattr(consultation.student, 'name', 'Unknown Student')
-            faculty_name = getattr(consultation.faculty, 'name', 'Unknown Faculty')
-            
-            # Create notification message
-            notification = {
-                'type': 'consultation_response',
-                'consultation_id': consultation_id,
-                'student_id': student_id,
-                'faculty_id': faculty_id,
-                'faculty_name': faculty_name,
-                'response_type': response_type,
-                'status': consultation.status.value,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            # Add response message if available
-            if consultation.response_message:
-                notification['message'] = consultation.response_message
-                
-            # Publish to system notifications topic
-            publish_mqtt_message(MQTTTopics.SYSTEM_NOTIFICATIONS, notification)
-            
-            # Publish to student-specific topic if needed
-            student_topic = f"consultease/student/{student_id}/notifications"
-            publish_mqtt_message(student_topic, notification)
-            
-            logger.info(f"Sent {response_type} notification to student {student_id} for consultation {consultation_id}")
-            
-        except Exception as e:
-            logger.error(f"Error notifying student of faculty response: {str(e)}")
-            # Don't fail the entire process if notification fails
 
     def get_response_statistics(self) -> Dict[str, Any]:
         """

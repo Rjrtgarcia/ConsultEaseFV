@@ -603,8 +603,21 @@ def init_db():
         # Check if student table is empty
         student_count = db.query(Student).count()
         if student_count == 0:
-            logger.info("📋 Student table is empty - ready for admin to add students")
-            logger.info("🎯 Use the admin dashboard to register students with their RFID cards")
+            # Create some sample students
+            sample_students = [
+                Student(
+                    name="Alice Johnson",
+                    department="Computer Science",
+                    rfid_uid="TESTCARD123"
+                ),
+                Student(
+                    name="Bob Williams",
+                    department="Mathematics",
+                    rfid_uid="TESTCARD456"
+                )
+            ]
+            db.add_all(sample_students)
+            logger.info("✅ Created sample student data")
 
         db.commit()
         logger.info("✅ Database initialization completed successfully")

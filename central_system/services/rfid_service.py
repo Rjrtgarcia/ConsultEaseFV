@@ -468,14 +468,12 @@ class RFIDService(QObject):
 
     def _simulate_rfid_reading(self):
         """
-        Simulation mode - kept for compatibility with hardware unavailability.
-        This mode is passive and doesn't auto-generate card reads.
+        Simulate RFID reading for development and testing.
         """
-        logger.info("RFID simulation mode active. No auto-simulation will occur.")
+        logger.info("RFID simulation mode active. Use simulate_card_read() to trigger simulated reads.")
 
-        # Just keep the thread alive without any simulation
         while self.running:
-            time.sleep(1)
+            time.sleep(1)  # Just keep the thread alive
 
     def refresh_student_data(self):
         """
@@ -510,18 +508,19 @@ class RFIDService(QObject):
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    def simulate_card_read(self, rfid_uid):
+    def simulate_card_read(self, rfid_uid=None):
         """
-        Process a manually entered RFID card read.
+        Simulate an RFID card read with a specified or random UID.
 
         Args:
-            rfid_uid (str): RFID UID to process
+            rfid_uid (str, optional): RFID UID to simulate. If None, a random UID is generated.
         """
         if not rfid_uid:
-            logger.warning("Cannot process empty RFID UID")
-            return None
+            # Generate a random RFID UID (10 characters hexadecimal - more like 13.56 MHz cards)
+            import random
+            rfid_uid = ''.join(random.choices('0123456789ABCDEF', k=10))
 
-        logger.info(f"Processing RFID: {rfid_uid}")
+        logger.info(f"Simulating RFID read (13.56 MHz format): {rfid_uid}")
 
         # Use the signal method to ensure consistent processing path with real reads
         self._notify_callbacks(rfid_uid)

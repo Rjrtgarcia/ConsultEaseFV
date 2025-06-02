@@ -214,13 +214,8 @@ class ConsultationController:
 
             if status == ConsultationStatus.ACCEPTED:
                 consultation.accepted_at = datetime.datetime.now()
-            elif status == ConsultationStatus.DECLINED:
-                consultation.declined_at = datetime.datetime.now()
             elif status == ConsultationStatus.COMPLETED:
                 consultation.completed_at = datetime.datetime.now()
-            elif status == ConsultationStatus.TIMEOUT:
-                consultation.declined_at = datetime.datetime.now()
-                consultation.response_message = "Faculty did not respond in time"
             elif status == ConsultationStatus.CANCELLED:
                 # No specific timestamp for cancellation, but we could add one if needed
                 pass
